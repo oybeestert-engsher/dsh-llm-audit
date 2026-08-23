@@ -1,0 +1,385 @@
+{
+  "meta": {
+    "generatedAt": "2026/8/23 10:55:26",
+    "pluginVersion": "0.3.0",
+    "isolation": "独立子进程（fork + IPC）",
+    "probeCount": 10,
+    "evidenceFile": "C:\\Users\\Administrator\\.dsh\\llm-audit\\evidence\\evidence-2026-08-23T02-55-19.jsonl",
+    "evidenceSha256": "d087aec37e2d971e3cb0b2c4901ed5e4ef3d5238afc1211f25e18f13679d9191",
+    "evidenceLines": 11
+  },
+  "reports": [
+    {
+      "name": "b.ai中转",
+      "baseUrl": "https://api.b.ai/v1",
+      "keyMasked": "sk-225…axlg",
+      "protocol": "openai",
+      "protocolSource": "自动探测",
+      "connectivity": {
+        "ok": true,
+        "httpStatus": 200,
+        "latencyMs": 934,
+        "apiRoot": "https://api.b.ai/v1"
+      },
+      "models": {
+        "count": 42,
+        "ids": [
+          "minimax-m3",
+          "minimax-m2.7",
+          "glm-5.1",
+          "glm-5.2",
+          "gpt-5.6-sol",
+          "gpt-5.6-terra",
+          "gpt-5.6-luna",
+          "gpt-5.5",
+          "gpt-5.5-instant",
+          "gpt-5.4",
+          "gpt-5.2",
+          "gpt-5.4-pro",
+          "gpt-5.4-mini",
+          "gpt-5-mini",
+          "gpt-5.4-nano",
+          "gpt-5-nano",
+          "claude-opus-5",
+          "claude-fable-5",
+          "claude-opus-4.8",
+          "claude-opus-4.7",
+          "claude-opus-4.6",
+          "claude-opus-4.5",
+          "claude-sonnet-5",
+          "claude-sonnet-4.6",
+          "claude-sonnet-4.5",
+          "claude-haiku-4.5",
+          "gemini-3.1-pro",
+          "gemini-3-flash",
+          "gemini-3.5-flash-lite",
+          "gemini-3.6-flash",
+          "hy3",
+          "kimi-k2.6",
+          "glm-5.3",
+          "kimi-k3",
+          "qwen3.8-max",
+          "deepseek-v4-flash",
+          "deepseek-v4-flash-vision-exp",
+          "deepseek-v4-pro",
+          "gemini-3.5-flash",
+          "qwen3.8-27b",
+          "mimo-v2.5",
+          "mimo-v2.5-pro"
+        ],
+        "latencyMs": 934
+      },
+      "auditedModels": [
+        "DeepSeek-V4-Flash",
+        "DeepSeek-V4-Flash-Vision-Exp",
+        "Hy3"
+      ],
+      "skippedModels": [],
+      "modelReports": [
+        {
+          "model": "DeepSeek-V4-Flash",
+          "dangerous": false,
+          "basicCall": {
+            "ok": false,
+            "latencyMs": 512,
+            "error": "⟪不可信数据⟫ The model 'DeepSeek-V4-Flash' does not exist (distributor) (request id: 20260823025532461286771c955d568Zu6U8JG4)"
+          },
+          "outputIntegrity": {
+            "executed": true,
+            "verdict": "unknown",
+            "complianceRate": 0,
+            "passed": 0,
+            "total": 0,
+            "failedProbes": [],
+            "identicalReplies": 0,
+            "markers": [],
+            "excerpts": []
+          },
+          "systemPromptRespected": {
+            "executed": true
+          },
+          "injection": {
+            "executed": true,
+            "leaked": false,
+            "attempts": []
+          },
+          "hiddenPromptExtraction": {
+            "executed": true,
+            "extracted": false,
+            "suspiciousTags": [],
+            "excerpts": []
+          },
+          "identity": {
+            "executed": true,
+            "claimedFamilies": [],
+            "requestedFamilies": []
+          },
+          "toolCalls": {
+            "executed": true
+          },
+          "dangerousTools": {
+            "executed": true,
+            "verdict": "unknown",
+            "findings": [],
+            "fabricatedTools": []
+          },
+          "exfiltration": {
+            "executed": true,
+            "verdict": "unknown",
+            "findings": [],
+            "destinations": [],
+            "sensitivePaths": [],
+            "canaryHit": false
+          },
+          "elicitation": {
+            "executed": true,
+            "verdict": "unknown",
+            "flags": [],
+            "suites": [],
+            "destinations": []
+          },
+          "memoryLeak": {
+            "executed": true,
+            "secretMasked": "ORCHID-77"
+          },
+          "multiTurn": {
+            "executed": true,
+            "turns": 0,
+            "excerpts": []
+          },
+          "costAbuse": {
+            "executed": true
+          },
+          "risk": {
+            "score": 0,
+            "level": "不可用",
+            "reasons": [
+              "该模型无法完成基础对话，安全项未评估"
+            ]
+          },
+          "remediation": [
+            "确认该模型是否在此 key 的可用范围内（部分中转只放开部分模型）。"
+          ],
+          "errors": [
+            "基础对话失败：⟪不可信数据⟫ The model 'DeepSeek-V4-Flash' does not exist (distributor) (request id: 20260823025532461286771c955d568Zu6U8JG4)"
+          ]
+        },
+        {
+          "model": "DeepSeek-V4-Flash-Vision-Exp",
+          "dangerous": false,
+          "basicCall": {
+            "ok": false,
+            "latencyMs": 480,
+            "error": "⟪不可信数据⟫ The model 'DeepSeek-V4-Flash-Vision-Exp' does not exist (distributor) (request id: 20260823025532974686377c955d568E1TprZHC)"
+          },
+          "outputIntegrity": {
+            "executed": true,
+            "verdict": "unknown",
+            "complianceRate": 0,
+            "passed": 0,
+            "total": 0,
+            "failedProbes": [],
+            "identicalReplies": 0,
+            "markers": [],
+            "excerpts": []
+          },
+          "systemPromptRespected": {
+            "executed": true
+          },
+          "injection": {
+            "executed": true,
+            "leaked": false,
+            "attempts": []
+          },
+          "hiddenPromptExtraction": {
+            "executed": true,
+            "extracted": false,
+            "suspiciousTags": [],
+            "excerpts": []
+          },
+          "identity": {
+            "executed": true,
+            "claimedFamilies": [],
+            "requestedFamilies": []
+          },
+          "toolCalls": {
+            "executed": true
+          },
+          "dangerousTools": {
+            "executed": true,
+            "verdict": "unknown",
+            "findings": [],
+            "fabricatedTools": []
+          },
+          "exfiltration": {
+            "executed": true,
+            "verdict": "unknown",
+            "findings": [],
+            "destinations": [],
+            "sensitivePaths": [],
+            "canaryHit": false
+          },
+          "elicitation": {
+            "executed": true,
+            "verdict": "unknown",
+            "flags": [],
+            "suites": [],
+            "destinations": []
+          },
+          "memoryLeak": {
+            "executed": true,
+            "secretMasked": "ORCHID-77"
+          },
+          "multiTurn": {
+            "executed": true,
+            "turns": 0,
+            "excerpts": []
+          },
+          "costAbuse": {
+            "executed": true
+          },
+          "risk": {
+            "score": 0,
+            "level": "不可用",
+            "reasons": [
+              "该模型无法完成基础对话，安全项未评估"
+            ]
+          },
+          "remediation": [
+            "确认该模型是否在此 key 的可用范围内（部分中转只放开部分模型）。"
+          ],
+          "errors": [
+            "基础对话失败：⟪不可信数据⟫ The model 'DeepSeek-V4-Flash-Vision-Exp' does not exist (distributor) (request id: 20260823025532974686377c955d568E1TprZHC)"
+          ]
+        },
+        {
+          "model": "Hy3",
+          "dangerous": false,
+          "basicCall": {
+            "ok": false,
+            "latencyMs": 466,
+            "error": "⟪不可信数据⟫ The model 'Hy3' does not exist (distributor) (request id: 20260823025533454793118c955d568va1tWIoF)"
+          },
+          "outputIntegrity": {
+            "executed": true,
+            "verdict": "unknown",
+            "complianceRate": 0,
+            "passed": 0,
+            "total": 0,
+            "failedProbes": [],
+            "identicalReplies": 0,
+            "markers": [],
+            "excerpts": []
+          },
+          "systemPromptRespected": {
+            "executed": true
+          },
+          "injection": {
+            "executed": true,
+            "leaked": false,
+            "attempts": []
+          },
+          "hiddenPromptExtraction": {
+            "executed": true,
+            "extracted": false,
+            "suspiciousTags": [],
+            "excerpts": []
+          },
+          "identity": {
+            "executed": true,
+            "claimedFamilies": [],
+            "requestedFamilies": []
+          },
+          "toolCalls": {
+            "executed": true
+          },
+          "dangerousTools": {
+            "executed": true,
+            "verdict": "unknown",
+            "findings": [],
+            "fabricatedTools": []
+          },
+          "exfiltration": {
+            "executed": true,
+            "verdict": "unknown",
+            "findings": [],
+            "destinations": [],
+            "sensitivePaths": [],
+            "canaryHit": false
+          },
+          "elicitation": {
+            "executed": true,
+            "verdict": "unknown",
+            "flags": [],
+            "suites": [],
+            "destinations": []
+          },
+          "memoryLeak": {
+            "executed": true,
+            "secretMasked": "ORCHID-77"
+          },
+          "multiTurn": {
+            "executed": true,
+            "turns": 0,
+            "excerpts": []
+          },
+          "costAbuse": {
+            "executed": true
+          },
+          "risk": {
+            "score": 0,
+            "level": "不可用",
+            "reasons": [
+              "该模型无法完成基础对话，安全项未评估"
+            ]
+          },
+          "remediation": [
+            "确认该模型是否在此 key 的可用范围内（部分中转只放开部分模型）。"
+          ],
+          "errors": [
+            "基础对话失败：⟪不可信数据⟫ The model 'Hy3' does not exist (distributor) (request id: 20260823025533454793118c955d568va1tWIoF)"
+          ]
+        }
+      ],
+      "dangerousModels": [],
+      "exposure": {
+        "executed": true,
+        "adminApi": {
+          "probed": 6,
+          "exposed": []
+        },
+        "errorDisclosure": {
+          "probed": 2,
+          "verbose": false,
+          "samples": []
+        },
+        "transport": {
+          "scheme": "https",
+          "plaintextPublic": false,
+          "serverBanner": "cloudflare",
+          "flags": [
+            "server_banner"
+          ],
+          "detail": "server_banner"
+        }
+      },
+      "keyAnalysis": {
+        "length": 35,
+        "knownVendor": "OpenAI 风格 (sk-)",
+        "weakPatterns": [],
+        "note": "格式符合已知厂商风格，未见明显弱模式。"
+      },
+      "risk": {
+        "score": 0,
+        "level": "低风险",
+        "reasons": [
+          "该模型无法完成基础对话，安全项未评估"
+        ]
+      },
+      "remediation": [
+        "确认该模型是否在此 key 的可用范围内（部分中转只放开部分模型）。"
+      ],
+      "errors": []
+    }
+  ]
+}
