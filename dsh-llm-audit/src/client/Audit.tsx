@@ -13,7 +13,7 @@
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type JSX, type ReactNode } from 'react'
 import {
-  addTarget, clearTargets, fetchProgress, listReports, listTargets, probe, readReport, removeTarget, runAudit,
+  addTarget, awaitJob, clearTargets, fetchProgress, getAuthToken, listReports, listTargets, probe, readReport, removeTarget, runAudit, setAuthToken,
   VENDOR_PRESETS,
   type ModelSummary, type ProgressState, type Protocol, type ReportEntry, type RunResult, type SavedTarget, type TargetSummary,
 } from './service.ts'
@@ -303,11 +303,24 @@ function modelChecks(m: ModelSummary): Array<{ label: string; state: CheckState;
   })
   checks.push({
     label: '身份',
-    state: m.identityConsistent === false ? 'bad'
+    state: m.identityRotating === true ? 'warn'
+      : m.identityConsistent === false ? 'bad'
       : m.identityConsistent === true && m.identityVersionConsistent === false ? 'warn'
       : m.identityConsistent === true ? 'ok'
       : 'na',
-    title: m.identityConsistent === true && m.identityVersionConsistent === false ? '同厂商但代次不符' : undefined,
+    title: m.identityRotating === true ? '多次询问自报身份不一致——后端在轮换模型' : m.identityConsistent === true && m.identityVersionConsistent === false ? '同厂商但代次不符' : undefined,
+  })
+  const sc = m.streamCheck
+  checks.push({
+    label: '流式',
+    state: sc === undefined ? 'na' : sc.verdict === 'consistent' ? 'ok' : sc.verdict === 'injected' || sc.verdict === 'failed' ? 'warn' : sc.verdict === 'hijacked' ? 'bad' : 'na',
+    title: sc?.detail,
+  })
+  const ctx = m.contextIntegrity
+  checks.push({
+    label: '上下文',
+    state: ctx === undefined ? 'na' : ctx.preserved === true ? 'ok' : ctx.preserved === false ? 'bad' : 'na',
+    title: ctx?.detail,
   })
   checks.push({ label: '记忆', state: m.memoryLeak?.leaked === true ? 'bad' : m.memoryLeak !== undefined ? 'ok' : 'na', title: m.memoryLeak?.detail })
   checks.push({ label: '诱饵', state: m.dangerousTools === undefined ? 'na' : m.dangerousTools.verdict === 'safe' ? 'ok' : m.dangerousTools.verdict === 'risky' ? 'warn' : 'bad', title: m.dangerousTools?.verdict })
@@ -384,6 +397,9 @@ function AuditPanel({ onClose, onCountChange }: { onClose: () => void; onCountCh
   const [model, setModel] = useState('')
   const [protocol, setProtocol] = useState<'' | Protocol>('')
   const [maxModels, setMaxModels] = useState('12')
+  const [preset, setPreset] = useState<'full' | 'standard' | 'quick'>('full')
+  const [token, setToken] = useState(getAuthToken())
+  const [tokenOpen, setTokenOpen] = useState(false)
   const [busy, setBusy] = useState<null | string>(null)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<RunResult | null>(null)
@@ -484,7 +500,8 @@ function AuditPanel({ onClose, onCountChange }: { onClose: () => void; onCountCh
     setBusy('probe'); setError(null); setResult(null); setViewer(null)
     startPolling()
     try {
-      const r = await probe(draft())
+      const { runId } = await probe(draft())
+      const r = await awaitJob(runId)
       setResult(r)
       if (r.ok === false) setError(r.error ?? '探活失败')
     } catch (e: unknown) { setError(String(e)) } finally { setBusy(null); stopPolling() }
@@ -497,7 +514,13 @@ function AuditPanel({ onClose, onCountChange }: { onClose: () => void; onCountCh
     startPolling()
     try {
       const cap = Number(maxModels)
-      const r = await runAudit({ targets: inline, useSaved: true, maxModels: Number.isFinite(cap) && cap > 0 ? cap : undefined })
+      const { runId } = await runAudit({
+        targets: inline,
+        useSaved: true,
+        checks: preset,
+        maxModels: Number.isFinite(cap) && cap > 0 ? cap : undefined,
+      })
+      const r = await awaitJob(runId)
       setResult(r)
       if (r.ok === false) setError(r.error ?? '审计失败')
       await reload()
@@ -519,18 +542,40 @@ function AuditPanel({ onClose, onCountChange }: { onClose: () => void; onCountCh
     <div role="dialog" aria-label="LLM 端点安全审计" style={{ ...panelStyle, position: 'fixed' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flex: 'none' }}>
         <h2 style={panelTitle}>LLM 端点安全审计</h2>
+        <button
+          type="button"
+          style={{ ...btnTiny, color: token !== '' ? '#1a7f37' : undefined }}
+          onClick={() => setTokenOpen((v) => !v)}
+          title={token !== '' ? '已配置面板访问令牌' : '面板访问令牌（宿主配置 authToken 时必填；本机访问无需配置）'}
+        >
+          ⚙{token !== '' ? '●' : ''}
+        </button>
         <button type="button" onClick={onClose} style={closeBtn} aria-label="关闭">✕</button>
       </div>
+      {tokenOpen ? (
+        <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+          <input
+            style={inputStyle}
+            type="password"
+            placeholder="面板访问令牌（宿主 authToken 配置；保存在本浏览器）"
+            value={token}
+            autoComplete="off"
+            onChange={(e) => { setToken(e.target.value); setAuthToken(e.target.value) }}
+          />
+        </div>
+      ) : null}
       <p style={{ ...hintStyle, margin: '6px 0 8px' }}>
         支持 OpenAI / Claude / Grok / Gemini，<strong>只填基础地址</strong>；同一 key 下<strong>逐模型点名</strong>。
         <button type="button" style={{ ...btnTiny, marginLeft: 6 }} onClick={() => setDescOpen((v) => !v)}>{descOpen ? '收起说明' : '检测项说明 ▾'}</button>
       </p>
       {descOpen ? (
         <p style={noticeStyle}>
-          逐模型检测：输出劫持（随机化探针）、提示词注入（双金丝雀）、多轮渐进越狱（命中复验）、隐藏系统提示提取（含 base64/ROT13 绕过）、
-          身份与代次一致性、跨会话串话、工具调用、危险工具诱饵、扫盘→外传链、七套诱发场景（关键词猎取 / 命令篡改 / 下游注入 /
-          凭据钓鱼 / 静默回传 / 分阶段侦察 / SSRF 云元数据）、费用放大（token 灌水 / max_tokens 钳制）。
-          目标级检测：管理面暴露（one-api/new-api 计费端点）、错误信息泄露（堆栈/上游透传）、传输态势（明文 http/CORS/server 头）、Key 形态分析。
+          逐模型检测：输出劫持（随机化探针）、流式 vs 非流式一致性、上下文完整性（历史是否被改写）、提示词注入（双金丝雀）、
+          多轮渐进越狱（命中复验）、隐藏系统提示提取（含 base64/ROT13 绕过）、身份与代次一致性（三连问检测后端轮换）、
+          跨会话串话、工具调用、危险工具诱饵、扫盘→外传链（金丝雀路径与外发地址逐轮随机）、七套诱发场景
+          （关键词猎取 / 命令篡改 / 下游注入 / 凭据钓鱼 / 静默回传 / 分阶段侦察 / SSRF 云元数据）、费用放大（token 灌水 / max_tokens 钳制）。
+          目标级检测：管理面暴露（one-api/new-api 计费端点）、错误信息泄露（堆栈/上游透传）、传输态势（明文 http/CORS/server 头/TLS 告警）、
+          Key 回显扫描、Key 形态分析、模型目录注水。
           所有探测在隔离子进程执行；端点原文只留证据文件，引文已脱敏；端点要求的工具调用一律只记录、不执行。
         </p>
       ) : null}
@@ -586,6 +631,11 @@ function AuditPanel({ onClose, onCountChange }: { onClose: () => void; onCountCh
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <input style={inputStyle} type="password" placeholder="API Key" value={apiKey} onChange={(e) => setApiKey(e.target.value)} autoComplete="off" />
           <input style={{ ...selectStyle, width: 96 }} placeholder="模型上限" value={maxModels} onChange={(e) => setMaxModels(e.target.value)} title="每个目标最多审计多少个模型" />
+          <select style={{ ...selectStyle, width: 84 }} value={preset} onChange={(e) => setPreset(e.target.value as 'full' | 'standard' | 'quick')} title="检查档位：全量（默认）/ 标准省去诱发场景 / 快速只跑核心安全项">
+            <option value="full">全量</option>
+            <option value="standard">标准</option>
+            <option value="quick">快速</option>
+          </select>
           <button type="button" style={s(btnGhost)} disabled={running} onClick={onResetForm} title="清空名称/地址/Key/模型/协议，已保存目标不受影响">清空重填</button>
           <button type="button" style={s(btnOutline)} disabled={running} onClick={() => void onAdd()}>添加</button>
         </div>
@@ -689,6 +739,7 @@ function TargetCard({ target, expanded, toggle }: {
     if (ex.transport.serverBanner !== undefined) exposureBits.push(ex.transport.serverBanner)
   }
   const ka = target.keyAnalysis
+  const keyEcho = target.keyEcho
   return (
     <div style={{ ...rowStyle, display: 'block' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, flexWrap: 'wrap' }}>
@@ -701,6 +752,11 @@ function TargetCard({ target, expanded, toggle }: {
         已审 {target.auditedModels.length} · 危险 {target.dangerousModels.length}
         {target.skippedModels.length > 0 ? ` · 跳过 ${target.skippedModels.length}` : ''}
       </div>
+      {keyEcho?.found === true ? (
+        <div style={{ ...hintStyle, marginTop: 2, color: '#a11111', fontWeight: 600 }}>
+          🚨 Key 回显：端点把你的 Key 原样吐回响应（{keyEcho.hits.length} 次）——立即轮换
+        </div>
+      ) : null}
       {ka !== undefined ? (
         <div style={{ ...hintStyle, marginTop: 2 }}>
           Key 形态：{ka.length} 字符{ka.knownVendor !== undefined ? ` · ${ka.knownVendor}` : ''}{ka.weakPatterns.length > 0 ? ` · ⚠️ ${ka.weakPatterns.join('；')}` : ''}

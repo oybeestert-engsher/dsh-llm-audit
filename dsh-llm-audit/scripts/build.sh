@@ -106,4 +106,11 @@ if [ -d "$ENSEMBLE/.bin" ]; then
 else
   echo "build: no client dependency store at $ENSEMBLE — skipping client bundle" >&2
 fi
+
+# ── 打包可安装 tgz（dsh plugin add 用）────────────────────────────────────
+if command -v npm >/dev/null 2>&1; then
+  echo "=== Packing installable .tgz ==="
+  (cd "$ROOT" && npm pack --pack-destination . >/dev/null)
+  echo "build: packed $(ls "$ROOT"/@dsh-external-dsh-llm-audit-*.tgz 2>/dev/null | tail -1)"
+fi
 echo "=== Build complete ==="

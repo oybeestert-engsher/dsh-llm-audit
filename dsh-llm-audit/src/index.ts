@@ -21,14 +21,14 @@ import type { Context } from 'cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import z from 'schemastery'
 import {
-  auditRun, buildLedgerEntries, keyFingerprintOf, makeRunId, maskKey, normalizeBase, renderReport, UNTRUSTED_NOTICE,
+  auditRun, buildLedgerEntries, keyFingerprintOf, makeRunId, maskKey, normalizeBase, renderReport, resolveChecks, UNTRUSTED_NOTICE,
   type AuditRunResult, type AuditTarget, type DangerLedgerRecord, type ProgressUpdate, type ReportMeta, type TargetReport,
 } from './audit-core.js'
 
 export const name = '@dsh-external/dsh-llm-audit'
 export const inject = ['tools']
 
-const PLUGIN_VERSION = '0.3.1'
+const PLUGIN_VERSION = '0.4.0'
 
 export interface Config {
   timeoutMs: number
@@ -39,6 +39,10 @@ export interface Config {
   maxModels: number
   /** 危险 Key 自动台账：扫到即写入本地文件（默认开）。 */
   ledger: boolean
+  /** 模型级并发（默认 1 串行；限流宽松的端点可调 2-3 提速）。 */
+  concurrency: number
+  /** 面板 HTTP 接口访问令牌；非空时所有 /plugins/dsh-llm-audit/* 请求必须携带 x-audit-token。 */
+  authToken: string
 }
 
 export const Config = z.object({
@@ -47,6 +51,8 @@ export const Config = z.object({
   isolate: z.boolean().default(true),
   maxModels: z.number().default(12),
   ledger: z.boolean().default(true),
+  concurrency: z.number().default(1),
+  authToken: z.string().default(''),
 })
 
 // ──────────────────────────── 存储 ────────────────────────────
@@ -120,7 +126,6 @@ interface ProgressState extends ProgressUpdate {
 
 /** 最近若干次运行的进度（本地单用户工具，保留 5 条足够）。 */
 const progressRuns = new Map<string, ProgressState>()
-let activeRunId: string | null = null
 
 function recordProgress(update: ProgressUpdate, error?: string): void {
   const prev = progressRuns.get(update.runId)
@@ -130,7 +135,6 @@ function recordProgress(update: ProgressUpdate, error?: string): void {
     updatedAt: Date.now(),
     ...(error === undefined ? {} : { error }),
   })
-  activeRunId = update.finished ? null : update.runId
   if (progressRuns.size > 5) {
     const oldest = [...progressRuns.entries()].sort((a, b) => a[1].updatedAt - b[1].updatedAt)[0]
     if (oldest !== undefined) progressRuns.delete(oldest[0])
@@ -166,8 +170,16 @@ function runIsolated(targets: AuditTarget[], options: Record<string, unknown>, b
     let child
     try {
       child = fork(WORKER_PATH, [], {
-        // 子进程不继承业务环境变量，只留最小必需集。
-        env: { PATH: process.env.PATH, NODE_ENV: process.env.NODE_ENV ?? 'production' },
+        // 子进程不继承业务环境变量，只留最小必需集（Windows 上保留 SystemRoot/TEMP 等系统项，
+        // 部分 Node 子系统在精简 env 下行为异常）。
+        env: {
+          PATH: process.env.PATH,
+          NODE_ENV: process.env.NODE_ENV ?? 'production',
+          ...(process.env.SystemRoot !== undefined ? { SystemRoot: process.env.SystemRoot } : {}),
+          ...(process.env.TEMP !== undefined ? { TEMP: process.env.TEMP } : {}),
+          ...(process.env.TMP !== undefined ? { TMP: process.env.TMP } : {}),
+          ...(process.env.ComSpec !== undefined ? { ComSpec: process.env.ComSpec } : {}),
+        },
         stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
       })
     } catch (e) {
@@ -242,11 +254,14 @@ function runIsolated(targets: AuditTarget[], options: Record<string, unknown>, b
 export interface RunArgs {
   targets?: AuditTarget[]
   useSaved?: boolean
-  checks?: string[]
+  /** 检查子集数组，或档位名 quick|standard|full。 */
+  checks?: string[] | string
   saveReport?: boolean
   includeReport?: boolean
   /** 本轮模型数上限（每个目标）。 */
   maxModels?: number
+  /** 外部指定 runId（面板 job 化后用于关联结果轮询）。 */
+  runId?: string
 }
 
 /** 工具与 UI 面板共用的完整审计入口：隔离执行 → 渲染报告 → 落盘 → 返回紧凑摘要。 */
@@ -269,20 +284,22 @@ export async function runAuditJob(config: Config, args: RunArgs): Promise<any> {
   }
   if (all.length === 0) return { ok: false, error: '没有可审计目标：请提供 targets（url + key）或先保存目标' }
 
-  const runId = makeRunId()
+  const runId = args.runId ?? makeRunId()
   // 给模型数加上限，防止超大值把预算/定时器推到危险范围。
   const rawMax = typeof args.maxModels === 'number' && args.maxModels > 0 ? Math.floor(args.maxModels) : config.maxModels
   const maxModels = Math.min(Math.max(1, rawMax), 100)
   const options = {
     timeoutMs: config.timeoutMs,
     delayMs: config.delayMs,
-    checks: Array.isArray(args.checks) ? args.checks : undefined,
+    checks: resolveChecks(args.checks),
     evidenceDir: evidenceDir(),
     runId,
     maxModels,
+    concurrency: config.concurrency,
   }
-  // 逐模型审计：单模型约 35 次探测（14 类检查），按目标 × 模型上限估算预算，再留 90s 收尾。
-  const budgetMs = all.length * maxModels * config.timeoutMs * 40 + 90_000
+  // 逐模型审计：单模型约 40 次探测（16 类检查），按目标 × 模型上限估算预算，再留 90s 收尾。
+  // setTimeout 的 delay 上限是 2^31-1，超限会"立即触发"——必须钳制。
+  const budgetMs = Math.min(all.length * maxModels * config.timeoutMs * 40 + 90_000, 2_147_483_000)
 
   // 起跑先登记一条进度，UI 立刻能显示"正在准备"
   recordProgress({
@@ -453,6 +470,13 @@ function summarize(r: TargetReport): Record<string, unknown> {
         : undefined,
       identityConsistent: m.identity.consistent,
       identityVersionConsistent: m.identity.versionConsistent,
+      identityRotating: m.identity.executed ? m.identity.rotating : undefined,
+      streamCheck: m.streamCheck.executed
+        ? { verdict: m.streamCheck.verdict, detail: m.streamCheck.detail }
+        : undefined,
+      contextIntegrity: m.contextIntegrity.executed
+        ? { preserved: m.contextIntegrity.preserved, detail: m.contextIntegrity.detail }
+        : undefined,
       toolCalls: m.toolCalls.supported,
       dangerousTools: m.dangerousTools.executed
         ? {
@@ -493,6 +517,7 @@ function summarize(r: TargetReport): Record<string, unknown> {
       errors: m.errors,
     })),
     exposure: r.exposure,
+    keyEcho: r.keyEcho,
     keyAnalysis: r.keyAnalysis,
     remediation: r.remediation,
     errors: r.errors,
@@ -610,16 +635,89 @@ function isSameOrigin(req: IncomingMessage): boolean {
   try { return new URL(origin).host === host } catch { return false }
 }
 
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]'])
+
+/**
+ * 面板接口访问控制（同源 ≠ 认证——Origin 挡不住 curl）：
+ * - 配置了 authToken：所有请求必须携带匹配的 x-audit-token 头（或 ?token=）；
+ * - 未配置：只放行 loopback 访问；Host 是局域网/公网地址时一律 403，
+ *   需要远程使用请配置 authToken。
+ */
+function guardPanelAccess(req: IncomingMessage, res: ServerResponse, config: Config): boolean {
+  if (config.authToken !== '') {
+    const url = new URL(req.url ?? '/', 'http://local')
+    const presented = String(req.headers['x-audit-token'] ?? url.searchParams.get('token') ?? '')
+    if (presented !== config.authToken) {
+      sendJson(res, 403, { ok: false, error: '访问令牌缺失或不正确（x-audit-token）' })
+      return false
+    }
+    return true
+  }
+  const host = String(req.headers.host ?? '').replace(/:\d+$/, '')
+  if (!LOOPBACK_HOSTS.has(host)) {
+    sendJson(res, 403, { ok: false, error: '面板接口默认仅允许本机访问（检测到非 loopback Host）。远程使用请在插件配置中设置 authToken，并在面板"⚙"里填同一令牌。' })
+    return false
+  }
+  return true
+}
+
+// ──────────────────── 异步任务（长审计不能挂在一个 HTTP 请求上）────────────────────
+
+interface JobState {
+  runId: string
+  kind: 'run' | 'probe'
+  status: 'running' | 'done' | 'failed'
+  startedAt: number
+  finishedAt?: number
+  result?: any
+  error?: string
+}
+
+/** 最近若干个面板任务（本地单用户，保留 5 个足够）。 */
+const jobs = new Map<string, JobState>()
+
+function startPanelJob(config: Config, kind: JobState['kind'], args: RunArgs): JobState {
+  const runId = args.runId ?? makeRunId()
+  const job: JobState = { runId, kind, status: 'running', startedAt: Date.now() }
+  jobs.set(runId, job)
+  if (jobs.size > 5) {
+    const oldest = [...jobs.entries()].sort((a, b) => a[1].startedAt - b[1].startedAt)[0]
+    if (oldest !== undefined) jobs.delete(oldest[0])
+  }
+  void runAuditJob(config, { ...args, runId })
+    .then((result) => {
+      job.status = 'done'
+      job.finishedAt = Date.now()
+      job.result = result
+    })
+    .catch((e: unknown) => {
+      job.status = 'failed'
+      job.finishedAt = Date.now()
+      job.error = errText(e)
+    })
+  return job
+}
+
+function jobPayload(runId: string): Record<string, unknown> {
+  const job = jobs.get(runId)
+  if (job === undefined) return { ok: false, error: '未找到该 runId 的任务（可能已被清理或尚未提交）' }
+  const progress = progressRuns.get(runId)
+  if (job.status === 'running') return { ok: true, status: 'running', runId, progress: progress ?? null }
+  if (job.status === 'failed') return { ok: false, status: 'failed', runId, error: job.error, progress: progress ?? null }
+  return { ok: true, status: 'done', runId, result: job.result }
+}
+
 // ──────────────────────────── 插件装配 ────────────────────────────
 
 export function apply(ctx: Context, config: Config): void {
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'llm_audit_run',
-    description: 'LLM 端点安全审计（隔离子进程执行，支持 OpenAI/Claude/Grok/Gemini 原生协议，地址只填基础域名）：模型可用性、输出劫持（随机化探针）、提示词注入（双金丝雀）、多轮渐进越狱、隐藏系统提示提取（含 base64/ROT13 编码绕过）、身份与代次一致性、跨会话串话、工具调用、危险工具诱饵、扫盘/外传诱饵、七套诱发场景（含 SSRF/云元数据）、费用放大（token 灌水/max_tokens 钳制）、目标面暴露（管理端点/错误泄露/传输态势）；产出正式审计报告文件。',
+    description: 'LLM 端点安全审计（隔离子进程执行，支持 OpenAI/Claude/Grok/Gemini 原生协议，地址只填基础域名）：模型可用性、输出劫持（随机化探针）、流式与非流式一致性、上下文完整性（历史是否被改写）、提示词注入（双金丝雀）、多轮渐进越狱、隐藏系统提示提取（含 base64/ROT13 编码绕过）、身份与代次一致性（三连问检测后端轮换）、跨会话串话、工具调用、危险工具诱饵、扫盘/外传诱饵、七套诱发场景（含 SSRF/云元数据）、费用放大（token 灌水/max_tokens 钳制）、目标面暴露（管理端点/错误泄露/传输态势/TLS 告警）、Key 回显扫描；产出正式审计报告文件。',
     parameters: {
       targets: { type: 'json', description: '目标数组 [{name?,baseUrl,apiKey,model?,protocol?}]，protocol 可选 openai|anthropic|gemini（缺省按域名自动探测）；缺省用已保存目标' },
       useSaved: { type: 'boolean', description: '是否合并已保存目标（默认 true）' },
-      checks: { type: 'json', description: '可选子集 [basic,integrity,system_prompt,injection,extraction,identity,tools,danger,exfil,elicit,memory,multiturn,cost,exposure]' },
+      preset: { type: 'string', description: '检查档位：quick=核心安全项（约 12 探测/模型，最省）/ standard=全项减诱发 / full=默认全量。与 checks 二选一' },
+      checks: { type: 'json', description: '可选子集 [basic,integrity,system_prompt,injection,extraction,identity,stream,context,tools,danger,exfil,elicit,memory,multiturn,cost,exposure]' },
       saveReport: { type: 'boolean', description: '是否写报告文件（默认 true）' },
       includeReport: { type: 'boolean', description: '是否把报告正文放进结果（默认 false，减少不可信数据入上下文）' },
       maxModels: { type: 'number', description: '每个目标最多审计多少个模型（默认 12；模型多时可调大，进度见面板进度条）' },
@@ -632,7 +730,7 @@ export function apply(ctx: Context, config: Config): void {
       return runAuditJob(config, {
         targets: asJson<AuditTarget[]>(args?.targets),
         useSaved: args?.useSaved,
-        checks: asJson<string[]>(args?.checks),
+        checks: asJson<string[]>(args?.checks) ?? (typeof args?.preset === 'string' && args.preset !== '' ? args.preset : undefined),
         saveReport: args?.saveReport,
         includeReport: args?.includeReport,
         maxModels: args?.maxModels,
@@ -703,6 +801,7 @@ export function apply(ctx: Context, config: Config): void {
       path: ROUTE_PREFIX + '/targets',
       async handler(req: IncomingMessage, res: ServerResponse) {
         try {
+          if (!guardPanelAccess(req, res, config)) return
           if (req.method === 'GET') return sendJson(res, 200, targetsCommand('list', {}))
           if (req.method === 'POST') {
             if (!isSameOrigin(req)) return sendJson(res, 403, { ok: false, error: '跨站请求被拒绝' })
@@ -731,18 +830,19 @@ export function apply(ctx: Context, config: Config): void {
             res.writeHead(405, { allow: 'POST' })
             return res.end()
           }
+          if (!guardPanelAccess(req, res, config)) return
           if (!isSameOrigin(req)) return sendJson(res, 403, { ok: false, error: '跨站请求被拒绝' })
           const body = (await readJson(req)) ?? {}
-          // 面板不是模型上下文，可以拿完整报告正文渲染。
-          const result = await runAuditJob(config, {
+          // 长审计不能挂在一个 HTTP 请求上：立即返回 runId，结果走 /result 轮询（进度走 /progress）。
+          const job = startPanelJob(config, 'run', {
             targets: Array.isArray(body.targets) ? body.targets : undefined,
             useSaved: body.useSaved,
-            checks: Array.isArray(body.checks) ? body.checks : undefined,
+            checks: Array.isArray(body.checks) ? body.checks : (typeof body.checks === 'string' ? body.checks : undefined),
             saveReport: body.saveReport,
             includeReport: body.includeReport !== false,
             maxModels: body.maxModels,
           })
-          sendJson(res, 200, result)
+          sendJson(res, 200, { ok: true, status: 'running', runId: job.runId, kind: job.kind })
         } catch (e) {
           sendJson(res, 400, { ok: false, error: errText(e) })
         }
@@ -758,21 +858,42 @@ export function apply(ctx: Context, config: Config): void {
             res.writeHead(405, { allow: 'POST' })
             return res.end()
           }
+          if (!guardPanelAccess(req, res, config)) return
           if (!isSameOrigin(req)) return sendJson(res, 403, { ok: false, error: '跨站请求被拒绝' })
           const body = (await readJson(req)) ?? {}
           if (!body.baseUrl || !body.apiKey) return sendJson(res, 400, { ok: false, error: '需要 baseUrl 与 apiKey' })
-          const result = await runAuditJob(config, {
+          const job = startPanelJob(config, 'probe', {
             targets: [{ baseUrl: body.baseUrl, apiKey: body.apiKey, model: body.model, protocol: body.protocol }],
             useSaved: false,
             checks: [],
             saveReport: false,
           })
-          sendJson(res, 200, result)
+          sendJson(res, 200, { ok: true, status: 'running', runId: job.runId, kind: job.kind })
         } catch (e) {
           sendJson(res, 400, { ok: false, error: errText(e) })
         }
       },
     }), '@dsh-external/dsh-llm-audit: probe route')
+
+    ctx.effect(() => webServer.register({
+      kind: 'exact',
+      path: ROUTE_PREFIX + '/result',
+      async handler(req: IncomingMessage, res: ServerResponse) {
+        try {
+          if (req.method !== 'GET') {
+            res.writeHead(405, { allow: 'GET' })
+            return res.end()
+          }
+          if (!guardPanelAccess(req, res, config)) return
+          const url = new URL(req.url ?? '/', 'http://local')
+          const runId = url.searchParams.get('runId')
+          if (runId === null || runId === '') return sendJson(res, 400, { ok: false, error: '需要 runId 参数' })
+          sendJson(res, 200, jobPayload(runId))
+        } catch (e) {
+          sendJson(res, 400, { ok: false, error: errText(e) })
+        }
+      },
+    }), '@dsh-external/dsh-llm-audit: result route')
 
     ctx.effect(() => webServer.register({
       kind: 'exact',
@@ -783,6 +904,7 @@ export function apply(ctx: Context, config: Config): void {
             res.writeHead(405, { allow: 'GET' })
             return res.end()
           }
+          if (!guardPanelAccess(req, res, config)) return
           sendJson(res, 200, progressSnapshot())
         } catch (e) {
           sendJson(res, 400, { ok: false, error: errText(e) })
@@ -795,6 +917,7 @@ export function apply(ctx: Context, config: Config): void {
       path: ROUTE_PREFIX + '/reports',
       async handler(req: IncomingMessage, res: ServerResponse) {
         try {
+          if (!guardPanelAccess(req, res, config)) return
           if (!isSameOrigin(req)) return sendJson(res, 403, { ok: false, error: '跨站请求被拒绝' })
           const url = new URL(req.url ?? '/', 'http://local')
           const file = url.searchParams.get('file')
