@@ -1,0 +1,59 @@
+{
+  "name": "@dsh-external/dsh-llm-audit",
+  "version": "0.3.1",
+  "description": "LLM 端点审计工具箱：检测 OpenAI 兼容端点的模型可用性、提示词注入风险、隐藏系统提示与工具调用能力，附 composer 审计面板",
+  "private": true,
+  "type": "module",
+  "main": "./lib/index.js",
+  "types": "./lib/types/index.d.ts",
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "license": "BSD-3-Clause",
+  "peerDependencies": {
+    "@deepseek-ai/dsh-client-runtime": ">=0.0.1-rc <2",
+    "@deepseek-ai/dsh-client-ui-conversation": ">=0.0.1-rc <2",
+    "@deepseek-ai/dsh-client-ui-slots": ">=0.0.1-rc <2",
+    "@deepseek-ai/dsh-llm": ">=0.0.1-rc <2",
+    "@deepseek-ai/dsh-tools": ">=0.0.1-rc <2",
+    "cordis": ">=4.0.0-rc <5",
+    "react": "^18.2.0",
+    "schemastery": "^3.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@types/react": "~18.3.1",
+    "react": "^18.2.0",
+    "tsdown": "^0.22.14",
+    "typescript": "^5.9.0"
+  },
+  "scripts": {
+    "build": "bash scripts/build.sh",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit"
+  },
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-slots"
+      ],
+      "platform": "web"
+    }
+  }
+}

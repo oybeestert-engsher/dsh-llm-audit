@@ -1,0 +1,8 @@
+# dsh-llm-audit bundle patch：把 LLM 端点审计插件按普通 bundle 挂进 dsh profile。
+# 安装：
+#   dsh plugin --profile web add ./dsh-external-dsh-llm-audit-0.3.1.tgz
+# 完整重启 DSH 后，宿主插件（三个审计工具 + HTTP 面板接口）与浏览器 UI 都会激活。
+- insert:
+    - id: dsh-llm-audit
+      name: '@dsh-external/dsh-llm-audit'
+      config: {}
