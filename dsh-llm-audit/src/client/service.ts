@@ -118,6 +118,8 @@ export interface ModelSummary {
   outputIntegrity?: IntegritySummary
   systemPromptRespected?: boolean
   injectionLeaked?: boolean
+  replyInjection?: { verdict: string; hits: Array<{ probe: string; kind: string }> }
+  delayedInjection?: { verdict: string; rounds: number }
   hiddenPrompt?: { extracted: boolean; suspiciousTags: string[] }
   identityConsistent?: boolean
   identityVersionConsistent?: boolean

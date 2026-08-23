@@ -28,7 +28,7 @@ import {
 export const name = '@dsh-external/dsh-llm-audit'
 export const inject = ['tools']
 
-const PLUGIN_VERSION = '0.4.0'
+const PLUGIN_VERSION = '0.4.1'
 
 export interface Config {
   timeoutMs: number
@@ -465,6 +465,12 @@ function summarize(r: TargetReport): Record<string, unknown> {
         : undefined,
       systemPromptRespected: m.systemPromptRespected.respected,
       injectionLeaked: m.injection.executed ? m.injection.leaked : undefined,
+      replyInjection: m.replyInjection.executed
+        ? { verdict: m.replyInjection.verdict, hits: m.replyInjection.hits.map((h) => ({ probe: h.probe, kind: h.kind })) }
+        : undefined,
+      delayedInjection: m.delayedInjection.executed
+        ? { verdict: m.delayedInjection.verdict, rounds: m.delayedInjection.rounds }
+        : undefined,
       hiddenPrompt: m.hiddenPromptExtraction.executed
         ? { extracted: m.hiddenPromptExtraction.extracted, suspiciousTags: m.hiddenPromptExtraction.suspiciousTags }
         : undefined,
@@ -712,12 +718,12 @@ function jobPayload(runId: string): Record<string, unknown> {
 export function apply(ctx: Context, config: Config): void {
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'llm_audit_run',
-    description: 'LLM 端点安全审计（隔离子进程执行，支持 OpenAI/Claude/Grok/Gemini 原生协议，地址只填基础域名）：模型可用性、输出劫持（随机化探针）、流式与非流式一致性、上下文完整性（历史是否被改写）、提示词注入（双金丝雀）、多轮渐进越狱、隐藏系统提示提取（含 base64/ROT13 编码绕过）、身份与代次一致性（三连问检测后端轮换）、跨会话串话、工具调用、危险工具诱饵、扫盘/外传诱饵、七套诱发场景（含 SSRF/云元数据）、费用放大（token 灌水/max_tokens 钳制）、目标面暴露（管理端点/错误泄露/传输态势/TLS 告警）、Key 回显扫描；产出正式审计报告文件。',
+    description: 'LLM 端点安全审计（隔离子进程执行，支持 OpenAI/Claude/Grok/Gemini 原生协议，地址只填基础域名）：模型可用性、输出劫持（随机化探针）、流式与非流式一致性、上下文完整性（历史是否被改写）、提示词注入（双金丝雀）、多轮渐进越狱、回复内嵌指令全量扫描、延迟注入探测、隐藏系统提示提取（含 base64/ROT13 编码绕过）、身份与代次一致性（三连问检测后端轮换）、跨会话串话、工具调用、危险工具诱饵、扫盘/外传诱饵、七套诱发场景（含 SSRF/云元数据）、费用放大（token 灌水/max_tokens 钳制）、目标面暴露（管理端点/错误泄露/传输态势/TLS 告警）、Key 回显扫描；产出正式审计报告文件。',
     parameters: {
       targets: { type: 'json', description: '目标数组 [{name?,baseUrl,apiKey,model?,protocol?}]，protocol 可选 openai|anthropic|gemini（缺省按域名自动探测）；缺省用已保存目标' },
       useSaved: { type: 'boolean', description: '是否合并已保存目标（默认 true）' },
       preset: { type: 'string', description: '检查档位：quick=核心安全项（约 12 探测/模型，最省）/ standard=全项减诱发 / full=默认全量。与 checks 二选一' },
-      checks: { type: 'json', description: '可选子集 [basic,integrity,system_prompt,injection,extraction,identity,stream,context,tools,danger,exfil,elicit,memory,multiturn,cost,exposure]' },
+      checks: { type: 'json', description: '可选子集 [basic,integrity,system_prompt,injection,extraction,identity,stream,context,tools,danger,exfil,elicit,memory,multiturn,cost,delayed,exposure]' },
       saveReport: { type: 'boolean', description: '是否写报告文件（默认 true）' },
       includeReport: { type: 'boolean', description: '是否把报告正文放进结果（默认 false，减少不可信数据入上下文）' },
       maxModels: { type: 'number', description: '每个目标最多审计多少个模型（默认 12；模型多时可调大，进度见面板进度条）' },

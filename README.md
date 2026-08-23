@@ -8,7 +8,7 @@ LLM 端点安全审计插件，用于 DeepSeek Harness (DSH)。
 
 - 多协议支持：OpenAI 兼容、Anthropic 原生、Gemini 原生，地址只填基础域名。
 - 逐模型审计：同一 Key 下每个可对话模型独立跑完整检查，报告直接点名危险模型。
-- 检查项：输出完整性/劫持、流式 vs 非流式一致性、上下文完整性（历史改写）、提示词注入、
+- 检查项：输出完整性/劫持、回复内嵌指令全量扫描、延迟注入、流式 vs 非流式一致性、上下文完整性（历史改写）、提示词注入、
   多轮渐进越狱、隐藏系统提示提取、身份与代次一致性（三连问检测后端轮换）、工具调用、
   危险工具诱饵、扫盘/外传诱饵（金丝雀路径与外发地址逐轮随机）、七套诱发场景（含 SSRF/云元数据）、
   跨会话串话（口令逐轮随机）、费用放大、目标面暴露（含 TLS 告警）、Key 回显扫描、模型目录注水、Key 形态分析。
@@ -52,7 +52,7 @@ archive/               旧版分步测试脚本
 DSH 命令行安装：
 
 ```bash
-dsh plugin --profile web add ./dsh-external-dsh-llm-audit-0.4.0.tgz
+dsh plugin --profile web add ./dsh-external-dsh-llm-audit-0.4.1.tgz
 ```
 
 完整重启 DSH 后生效。

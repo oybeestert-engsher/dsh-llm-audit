@@ -291,7 +291,12 @@ function modelChecks(m: ModelSummary): Array<{ label: string; state: CheckState;
   })
   const singleLeak = m.injectionLeaked === true
   const mtLeak = m.multiTurn?.leaked === true
-  checks.push({ label: '注入', state: (singleLeak || mtLeak) ? 'bad' : (m.injectionLeaked === false || m.multiTurn !== undefined) ? 'ok' : 'na', title: mtLeak ? '多轮渐进泄漏（单轮未漏）' : singleLeak ? '单轮注入泄漏' : '抵抗' })
+  const riHit = (m.replyInjection?.hits.length ?? 0) > 0 || m.delayedInjection?.verdict === 'injected'
+  checks.push({
+    label: '注入',
+    state: (singleLeak || mtLeak || riHit) ? 'bad' : (m.injectionLeaked === false || m.multiTurn !== undefined || m.replyInjection !== undefined) ? 'ok' : 'na',
+    title: mtLeak ? '多轮渐进泄漏（单轮未漏）' : singleLeak ? '单轮注入泄漏' : riHit ? '回复内嵌指令/延迟注入' : '抵抗',
+  })
   const hp = m.hiddenPrompt
   checks.push({
     label: '隐提',
@@ -571,7 +576,8 @@ function AuditPanel({ onClose, onCountChange }: { onClose: () => void; onCountCh
       {descOpen ? (
         <p style={noticeStyle}>
           逐模型检测：输出劫持（随机化探针）、流式 vs 非流式一致性、上下文完整性（历史是否被改写）、提示词注入（双金丝雀）、
-          多轮渐进越狱（命中复验）、隐藏系统提示提取（含 base64/ROT13 绕过）、身份与代次一致性（三连问检测后端轮换）、
+          多轮渐进越狱（命中复验）、回复内嵌指令全量扫描 + 延迟注入探测（中转在普通回复里塞 agent 指令）、
+          隐藏系统提示提取（含 base64/ROT13 绕过）、身份与代次一致性（三连问检测后端轮换）、
           跨会话串话、工具调用、危险工具诱饵、扫盘→外传链（金丝雀路径与外发地址逐轮随机）、七套诱发场景
           （关键词猎取 / 命令篡改 / 下游注入 / 凭据钓鱼 / 静默回传 / 分阶段侦察 / SSRF 云元数据）、费用放大（token 灌水 / max_tokens 钳制）。
           目标级检测：管理面暴露（one-api/new-api 计费端点）、错误信息泄露（堆栈/上游透传）、传输态势（明文 http/CORS/server 头/TLS 告警）、

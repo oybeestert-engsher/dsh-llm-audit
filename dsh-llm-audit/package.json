@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-llm-audit",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "LLM 端点审计工具箱：检测 OpenAI 兼容端点的模型可用性、提示词注入风险、隐藏系统提示与工具调用能力，附 composer 审计面板",
   "private": true,
   "type": "module",
