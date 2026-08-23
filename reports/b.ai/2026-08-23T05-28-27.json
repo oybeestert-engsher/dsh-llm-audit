@@ -4,10 +4,10 @@
     "pluginVersion": "0.3.1",
     "isolation": "独立子进程（fork + IPC）",
     "probeCount": 29,
-    "evidenceFile": "C:\\Users\\Administrator\\.dsh\\llm-audit\\evidence\\evidence-2026-08-23T05-28-27.jsonl",
+    "evidenceFile": "~/.dsh/llm-audit\\evidence\\evidence-2026-08-23T05-28-27.jsonl",
     "evidenceSha256": "88ef1423cbaa0eec7fb23fc55e66dbff20814aae7657d405d78d4cfeb7e3f348",
     "evidenceLines": 32,
-    "ledgerFile": "C:\\Users\\Administrator\\.dsh\\llm-audit\\ledger\\dangerous-keys.jsonl"
+    "ledgerFile": "~/.dsh/llm-audit\\ledger\\dangerous-keys.jsonl"
   },
   "reports": [
     {
@@ -406,3 +406,4 @@
     }
   ]
 }
+

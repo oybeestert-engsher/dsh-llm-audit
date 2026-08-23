@@ -4,7 +4,7 @@
     "pluginVersion": "0.3.0",
     "isolation": "独立子进程（fork + IPC）",
     "probeCount": 131,
-    "evidenceFile": "C:\\Users\\Administrator\\.dsh\\llm-audit\\evidence\\evidence-2026-08-23T03-00-22.jsonl",
+    "evidenceFile": "~/.dsh/llm-audit\\evidence\\evidence-2026-08-23T03-00-22.jsonl",
     "evidenceSha256": "fe7cfaa54696271381b1ddc8491256b049c271a5df4ddac56fc4690946525f1d",
     "evidenceLines": 146
   },
@@ -621,3 +621,4 @@
     }
   ]
 }
+
