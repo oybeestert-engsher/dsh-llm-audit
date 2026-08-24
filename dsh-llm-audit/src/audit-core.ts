@@ -298,6 +298,8 @@ export interface TargetReport {
   requestedModel?: string
   protocol: Protocol
   protocolSource: '显式指定' | '域名推断' | '自动探测'
+  /** 命中的客户端指纹档位（端点做客户端白名单时自动降级命中）。 */
+  clientProfile: ClientProfile
   connectivity: { ok: boolean; httpStatus: number; latencyMs: number; apiRoot: string; errors?: string[] }
   models: { count: number; ids: string[]; latencyMs: number }
   /** 实际审计的模型 */
@@ -424,13 +426,43 @@ function hasVersionSuffix(base: string): boolean {
   return /^v\d+/i.test(base.split('/').pop() || '')
 }
 
-// ──────────────────────── 协议适配器 ────────────────────────
+// ──────────────────────── 客户端指纹档位 ────────────────────────
+// 不少中转按客户端白名单放行（只认 Codex CLI / Claude Code 等 agent 客户端），
+// 默认请求会得到 401 "unauthorized client detected"。这里内置两套真实 agent
+// 的请求头指纹，探测被拦时自动降级重试，命中后整轮沿用该档位。
+
+export type ClientProfile = 'default' | 'codex' | 'claude-code'
+
+/** 真实 agent 客户端的请求头指纹（实测可通过客户端白名单类中转）。 */
+export const CLIENT_PROFILE_HEADERS: Record<Exclude<ClientProfile, 'default'>, Record<string, string>> = {
+  codex: {
+    'User-Agent': 'codex_cli_rs/0.21.0 (Windows 11; x86_64) WindowsTerminal',
+    originator: 'codex_cli_rs',
+    'OpenAI-Beta': 'responses=experimental',
+  },
+  'claude-code': {
+    'User-Agent': 'claude-cli/1.0.60 (external, cli)',
+    'x-app': 'cli',
+  },
+}
+
+export const CLIENT_PROFILE_LABEL: Record<ClientProfile, string> = {
+  default: '默认（审计器原生请求）',
+  codex: 'Codex CLI 指纹',
+  'claude-code': 'Claude Code 指纹',
+}
+
+/** 是否属于"客户端被拦"类失败（值得换指纹档位重试）：401/403，或带特征文案。 */
+function isClientBlocked(status: number, bodyHead: string): boolean {
+  if (status !== 401 && status !== 403) return false
+  return true
+}
 
 interface Adapter {
   id: Protocol
   label: string
   roots(base: string): string[]
-  headers(apiKey: string): Record<string, string>
+  headers(apiKey: string, profile?: ClientProfile): Record<string, string>
   modelsUrl(root: string): string
   parseModels(json: any): string[] | null
   chatUrl(root: string, model: string): string
@@ -450,11 +482,17 @@ function textFromOpenAI(message: any): string {
   return ''
 }
 
+/** 基础鉴权头 + 按需叠加客户端指纹头。 */
+function withProfile(apiKey: string, base: Record<string, string>, profile?: ClientProfile): Record<string, string> {
+  if (profile === undefined || profile === 'default') return { ...base }
+  return { ...base, ...CLIENT_PROFILE_HEADERS[profile] }
+}
+
 const openaiAdapter: Adapter = {
   id: 'openai',
   label: 'OpenAI 兼容（含 xAI Grok / 中转站）',
   roots: (base) => (hasVersionSuffix(base) ? [base] : [base + '/v1', base]),
-  headers: (apiKey) => ({ Authorization: 'Bearer ' + apiKey, 'api-key': apiKey, 'Content-Type': 'application/json' }),
+  headers: (apiKey, profile) => withProfile(apiKey, { Authorization: 'Bearer ' + apiKey, 'api-key': apiKey, 'Content-Type': 'application/json' }, profile),
   modelsUrl: (root) => root + '/models',
   parseModels: (json) => (Array.isArray(json?.data) ? json.data.map((m: any) => String(m?.id ?? m?.name ?? '?')) : null),
   chatUrl: (root) => root + '/chat/completions',
@@ -499,7 +537,7 @@ const anthropicAdapter: Adapter = {
   id: 'anthropic',
   label: 'Anthropic Claude 原生（/v1/messages）',
   roots: (base) => (hasVersionSuffix(base) ? [base] : [base + '/v1', base]),
-  headers: (apiKey) => ({ 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' }),
+  headers: (apiKey, profile) => withProfile(apiKey, { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' }, profile),
   modelsUrl: (root) => root + '/models',
   parseModels: (json) => (Array.isArray(json?.data) ? json.data.map((m: any) => String(m?.id ?? m?.display_name ?? '?')) : null),
   chatUrl: (root) => root + '/messages',
@@ -542,7 +580,7 @@ const geminiAdapter: Adapter = {
   id: 'gemini',
   label: 'Google Gemini 原生（:generateContent）',
   roots: (base) => (hasVersionSuffix(base) ? [base] : [base + '/v1beta', base + '/v1']),
-  headers: (apiKey) => ({ 'x-goog-api-key': apiKey, 'Content-Type': 'application/json' }),
+  headers: (apiKey, profile) => withProfile(apiKey, { 'x-goog-api-key': apiKey, 'Content-Type': 'application/json' }, profile),
   modelsUrl: (root) => root + '/models',
   parseModels: (json) => {
     if (Array.isArray(json?.models)) return json.models.map((m: any) => String(m?.name ?? '').replace(/^models\//, ''))
@@ -850,6 +888,8 @@ interface ChatContext {
   evidence: EvidenceLog
   targetName: string
   counter: ProbeCounter
+  /** 客户端指纹档位（resolveEndpoint 探测命中后整轮沿用）。 */
+  profile?: ClientProfile
   /** Key 回显收集（目标级，所有模型共享）。 */
   keyEcho: KeyEchoLog
   /** 回复内嵌指令收集（模型级，chatCall 全量扫描填充）。 */
@@ -859,7 +899,7 @@ interface ChatContext {
 }
 
 async function chatCall(cx: ChatContext, probe: string, req: NeutralRequest): Promise<ChatOutcome> {
-  const headers = cx.adapter.headers(cx.apiKey)
+  const headers = cx.adapter.headers(cx.apiKey, cx.profile)
   const modes: Array<0 | 1 | 2> = cx.adapter.tokenFallback && req.noTokenFallback !== true ? [0, 1, 2] : [0]
   let last: ChatOutcome | null = null
   for (const mode of modes) {
@@ -932,7 +972,7 @@ function assembleStream(adapter: Adapter, text: string): string {
 
 /** 流式探测：同一 prompt 打一次 stream=true，取回组装后的完整文本。 */
 async function streamCall(cx: ChatContext, probe: string, req: { user: string; maxTokens: number }): Promise<{ status: number; assembled: string; error?: string }> {
-  const headers = cx.adapter.headers(cx.apiKey)
+  const headers = cx.adapter.headers(cx.apiKey, cx.profile)
   cx.counter.probes += 1
   const body = cx.adapter.chatBody({ user: req.user, maxTokens: req.maxTokens, stream: true }, cx.model, 0)
   const url = cx.adapter.streamUrl(cx.root, cx.model)
@@ -2384,6 +2424,8 @@ interface Resolved {
   errors: string[]
   /** 模型列表探测的响应头样本（传输态势检查用）。 */
   headersSample: Record<string, string>
+  /** 命中的客户端指纹档位（客户端白名单类中转会从 default 降级到 codex/claude-code）。 */
+  profile: ClientProfile
 }
 
 async function resolveEndpoint(target: AuditTarget, timeoutMs: number, evidence: EvidenceLog, counter: ProbeCounter, name: string, keyEcho: KeyEchoLog): Promise<Resolved> {
@@ -2392,23 +2434,56 @@ async function resolveEndpoint(target: AuditTarget, timeoutMs: number, evidence:
   const errors: string[] = []
   let fallback: { protocol: Protocol; root: string } | null = null
 
-  for (const protocol of list) {
-    const adapter = ADAPTERS[protocol]
-    for (const root of adapter.roots(base)) {
-      if (fallback === null) fallback = { protocol, root }
-      counter.probes += 1
-      const url = adapter.modelsUrl(root)
-      const r = await httpJson(url, { method: 'GET', headers: adapter.headers(target.apiKey), timeoutMs })
-      evidence.write({ kind: 'probe', at: new Date().toISOString(), target: name, protocol, probe: 'models', request: { url }, response: { status: r.status, bodyHead: r.text.slice(0, 2000) } })
-      noteKeyEcho(keyEcho, target.apiKey, 'models', r)
-      if (counter.tick !== undefined) counter.tick()
-      const ids = r.status === 200 ? adapter.parseModels(r.json) : null
-      if (ids !== null) return { protocol, source, root, ok: true, latencyMs: r.latencyMs, modelIds: ids, errors, headersSample: r.headers }
-      errors.push(`[${protocol}] ${url} → HTTP ${r.status}${r.error !== undefined ? ' (' + r.error + ')' : ''}`)
+  // 候选枚举：协议 × 版本前缀 × 客户端指纹档位。
+  // 第一轮用默认档；若没有任何候选拿到合法 API 形状的模型清单、且出现过
+  // "客户端被拦"（401/403），换 agent 指纹档重试——这类中转只放行 Codex CLI /
+  // Claude Code 等白名单客户端，key 本身可能是好的。注意：裸根返回 200 的
+  // 网站 HTML 页不算"合法形状"，也不算"未被拦"，不能打断降级判定。
+  const profiles: ClientProfile[] = ['default', 'codex', 'claude-code']
+  let sawValidShape = false
+  let sawBlocked = false
+  let lastSample: Record<string, string> = {}
+
+  const attemptWith = async (profile: ClientProfile): Promise<Resolved | null> => {
+    for (const protocol of list) {
+      const adapter = ADAPTERS[protocol]
+      for (const root of adapter.roots(base)) {
+        if (profile === 'default' && fallback === null) fallback = { protocol, root }
+        counter.probes += 1
+        const url = adapter.modelsUrl(root)
+        const r = await httpJson(url, { method: 'GET', headers: adapter.headers(target.apiKey, profile), timeoutMs })
+        lastSample = r.headers
+        evidence.write({ kind: 'probe', at: new Date().toISOString(), target: name, protocol, profile, probe: 'models', request: { url }, response: { status: r.status, bodyHead: r.text.slice(0, 2000) } })
+        noteKeyEcho(keyEcho, target.apiKey, 'models', r)
+        if (counter.tick !== undefined) counter.tick()
+        const ids = r.status === 200 ? adapter.parseModels(r.json) : null
+        if (ids !== null) {
+          sawValidShape = true
+          const note = profile === 'default' ? [] : [`端点启用了客户端白名单，已自动切换到「${CLIENT_PROFILE_LABEL[profile]}」完成探测`]
+          return { protocol, source, root, ok: true, latencyMs: r.latencyMs, modelIds: ids, errors: [...errors, ...note], headersSample: r.headers, profile }
+        }
+        if (isClientBlocked(r.status, r.text.slice(0, 300))) sawBlocked = true
+        const thisBlocked = r.status === 401 || r.status === 403
+        errors.push(`[${protocol}/${profile}] ${url} → HTTP ${r.status}${r.error !== undefined ? ' (' + r.error + ')' : ''}${thisBlocked ? '（鉴权/客户端被拦）' : ''}`)
+      }
+    }
+    return null
+  }
+
+  // 第一轮：默认档
+  const def = await attemptWith('default')
+  if (def !== null) return def
+
+  // 第二轮：没拿到过合法模型清单、且失败形态符合"客户端拦截"时，换 agent 指纹
+  if (!sawValidShape && sawBlocked) {
+    for (const profile of ['codex', 'claude-code'] as const) {
+      const hit = await attemptWith(profile)
+      if (hit !== null) return hit
     }
   }
+
   const chosen = fallback ?? { protocol: list[0], root: ADAPTERS[list[0]].roots(base)[0] }
-  return { protocol: chosen.protocol, source, root: chosen.root, ok: false, latencyMs: 0, modelIds: [], errors, headersSample: {} }
+  return { protocol: chosen.protocol, source, root: chosen.root, ok: false, latencyMs: 0, modelIds: [], errors, headersSample: lastSample, profile: 'default' }
 }
 
 // ──────────────────── 目标面暴露（管理端点/错误泄露/传输态势）────────────────────
@@ -2711,6 +2786,7 @@ function aggregateTarget(plan: TargetPlan, modelReports: ModelReport[], checks: 
     ...(target.model === undefined ? {} : { requestedModel: target.model }),
     protocol: resolved.protocol,
     protocolSource: resolved.source,
+    clientProfile: resolved.profile,
     connectivity: resolved.ok
       ? { ok: true, httpStatus: 200, latencyMs: resolved.latencyMs, apiRoot: resolved.root }
       : { ok: modelReports.some((m) => m.basicCall.ok), httpStatus: 0, latencyMs: 0, apiRoot: resolved.root, errors: resolved.errors },
@@ -2861,6 +2937,7 @@ export async function auditRun(targets: AuditTarget[], opts: AuditRunOptions): P
             evidence,
             targetName: plan.name,
             counter,
+            profile: plan.resolved.profile,
             keyEcho: plan.keyEcho,
             replyScan: { hits: [], scanned: 0 },
             secrets: runOpts.runSecrets ?? makeRunSecrets(),
@@ -3065,6 +3142,9 @@ export function renderReport(reports: TargetReport[], meta: ReportMeta): string 
   reports.forEach((r, i) => {
     L.push('---', '', `## ${i + 2}. ${safeId(r.name, 60)} — ${r.risk.level}（${r.risk.score}/100）`, '')
     L.push(`- 端点 \`${safeId(r.baseUrl)}\` → API 根 \`${safeId(r.connectivity.apiRoot)}\` · 协议 ${PROTOCOL_LABEL[r.protocol]}（${r.protocolSource}） · Key \`${r.keyMasked}\``)
+    if (r.clientProfile !== undefined && r.clientProfile !== 'default') {
+      L.push(`- ⚠️ 客户端白名单：该端点拦截非 agent 客户端，审计已自动切换到「${CLIENT_PROFILE_LABEL[r.clientProfile]}」——普通 OpenAI SDK 直连会被 401 拒绝`)
+    }
     L.push(`- 模型：端点共 ${r.models.count} 个，已审 ${r.auditedModels.length}${r.skippedModels.length > 0 ? `，跳过 ${r.skippedModels.length}` : ''}`)
     if (r.keyAnalysis !== undefined) {
       const ka = r.keyAnalysis

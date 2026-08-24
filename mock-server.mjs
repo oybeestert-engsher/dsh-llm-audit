@@ -512,6 +512,21 @@ function serve(protocol, port) {
       if (protocol === 'gemini') key = String(req.headers['x-goog-api-key'] || url.searchParams.get('key') || '')
       if (!key) return send(res, 401, { error: { message: `missing credential for ${protocol}` } })
 
+      // ── 客户端白名单门（复刻 agentrouter 类中转）：key 含 agentfw 时，
+      // 只放行 Codex CLI / Claude Code 指纹的请求，其余一律 401 unauthorized client。
+      if (/agentfw/i.test(key)) {
+        const ua = String(req.headers['user-agent'] || '')
+        const originator = String(req.headers['originator'] || '')
+        const xapp = String(req.headers['x-app'] || '')
+        const isAgentClient = /codex_cli/i.test(ua) || originator === 'codex_cli_rs' || /claude-cli/i.test(ua) || xapp === 'cli'
+        if (!isAgentClient) {
+          return send(res, 401, {
+            error: { message: 'unauthorized client detected, contact support for assistance at https://discord.gg/example' },
+            message: 'UNAUTHENTICATED', success: false, type: 'unauthorized_client_error',
+          })
+        }
+      }
+
       // 模型列表
       if (req.method === 'GET' && /\/models$/.test(path)) {
         if (protocol === 'gemini') {

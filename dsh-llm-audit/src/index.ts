@@ -452,6 +452,7 @@ function summarize(r: TargetReport): Record<string, unknown> {
     keyMasked: r.keyMasked,
     protocol: r.protocol,
     protocolSource: r.protocolSource,
+    clientProfile: r.clientProfile,
     apiRoot: r.connectivity.apiRoot,
     reachable: r.connectivity.ok,
     modelsOnEndpoint: r.models.count,
