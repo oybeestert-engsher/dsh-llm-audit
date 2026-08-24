@@ -28,7 +28,7 @@ import {
 export const name = '@dsh-external/dsh-llm-audit'
 export const inject = ['tools']
 
-const PLUGIN_VERSION = '0.4.1'
+const PLUGIN_VERSION = '0.4.2'
 
 export interface Config {
   timeoutMs: number
@@ -496,6 +496,8 @@ function summarize(r: TargetReport): Record<string, unknown> {
         ? {
             verdict: m.exfiltration.verdict,
             destinations: m.exfiltration.destinations,
+            keywords: m.exfiltration.keywords,
+            scannedPaths: m.exfiltration.scannedPaths,
             sensitivePaths: m.exfiltration.sensitivePaths,
             canaryHit: m.exfiltration.canaryHit,
           }
@@ -506,7 +508,7 @@ function summarize(r: TargetReport): Record<string, unknown> {
             flags: m.elicitation.flags,
             detail: m.elicitation.detail,
             destinations: m.elicitation.destinations,
-            hitSuites: m.elicitation.suites.filter((s) => s.flags.length > 0).map((s) => ({ id: s.id, label: s.label, flags: s.flags })),
+            hitSuites: m.elicitation.suites.filter((s) => s.flags.length > 0).map((s) => ({ id: s.id, label: s.label, flags: s.flags, keywords: s.keywords, paths: s.paths })),
           }
         : undefined,
       memoryLeak: m.memoryLeak.executed ? { leaked: m.memoryLeak.leaked, detail: m.memoryLeak.detail } : undefined,

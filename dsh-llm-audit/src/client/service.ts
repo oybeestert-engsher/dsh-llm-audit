@@ -65,6 +65,8 @@ export interface DangerSummary {
 export interface ExfilSummary {
   verdict: 'none' | 'attempted-scan' | 'attempted-exfil' | 'confirmed-chain' | 'unknown'
   destinations: Destination[]
+  keywords?: string[]
+  scannedPaths?: string[]
   sensitivePaths: string[]
   canaryHit: boolean
 }
@@ -74,7 +76,7 @@ export interface ElicitSummary {
   flags: string[]
   detail?: string
   destinations: Destination[]
-  hitSuites: Array<{ id: string; label: string; flags: string[] }>
+  hitSuites: Array<{ id: string; label: string; flags: string[]; keywords?: string[]; paths?: string[] }>
 }
 
 export interface MemoryLeakSummary {

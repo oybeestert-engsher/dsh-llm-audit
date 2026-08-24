@@ -52,7 +52,7 @@ archive/               旧版分步测试脚本
 DSH 命令行安装：
 
 ```bash
-dsh plugin --profile web add ./dsh-external-dsh-llm-audit-0.4.1.tgz
+dsh plugin --profile web add ./dsh-external-dsh-llm-audit-0.4.2.tgz
 ```
 
 完整重启 DSH 后生效。

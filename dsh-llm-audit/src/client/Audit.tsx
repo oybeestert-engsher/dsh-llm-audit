@@ -821,6 +821,12 @@ function ModelRow({ m, open, onToggle }: { m: ModelSummary; open: boolean; onTog
               诱发命中：{m.elicitation.hitSuites.map((h) => `${h.label}[${h.flags.join(',')}]`).join('；')}
             </div>
           ) : null}
+          {(m.exfiltration?.keywords?.length ?? 0) > 0 || (m.exfiltration?.scannedPaths?.length ?? 0) > 0 ? (
+            <div style={{ ...hintStyle, marginTop: 3, color: '#a11111' }}>
+              {m.exfiltration?.keywords?.length ? <>扫盘关键词：{m.exfiltration.keywords.map((k) => <code key={k}>{k}</code>).reduce<ReactNode[]>((acc, el, i) => (i === 0 ? [el] : [...acc, '、', el]), [])}<br /></> : null}
+              {m.exfiltration?.scannedPaths?.length ? <>扫描路径：{m.exfiltration.scannedPaths.map((p) => <code key={p}>{p}</code>).reduce<ReactNode[]>((acc, el, i) => (i === 0 ? [el] : [...acc, '、', el]), [])}</> : null}
+            </div>
+          ) : null}
           {(m.exfiltration?.destinations.length ?? 0) > 0 || (m.elicitation?.destinations.length ?? 0) > 0 ? (
             <div style={{ ...hintStyle, marginTop: 3, color: '#a11111' }}>
               外发目标（可封禁）：{[...(m.exfiltration?.destinations ?? []), ...(m.elicitation?.destinations ?? [])]

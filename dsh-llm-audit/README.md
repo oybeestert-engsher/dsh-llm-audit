@@ -236,7 +236,7 @@ dev_reload_package { packageName: "dsh-llm-audit" }                 # 热重载�
 dev_inject_plugin { dir: "E:\deepseek\llm-audit\dsh-llm-audit" }    # 首次注入
 ```
 
-自测（不依赖 DSH，`test-driver.mjs` 145 项断言：脱敏、三协议、逐模型、输出劫持/污染、
+自测（不依赖 DSH，`test-driver.mjs` 148 项断言：脱敏、三协议、逐模型、输出劫持/污染、
 危险工具、扫盘外传（随机金丝雀路径/外发 IP）、七套诱发（含 SSRF）、跨会话串话（随机口令）、多轮越狱、费用放大、面暴露、
 **流式劫持 / 上下文丢弃 / 后端轮换 / Key 回显 / 模型目录注水**、红队逃逸人格、报告注入转义、进度、证据、报告）。
 旧分步测试已归档至 `archive/`。构建脚本末尾会 `npm pack` 产出可安装的 `.tgz`。
