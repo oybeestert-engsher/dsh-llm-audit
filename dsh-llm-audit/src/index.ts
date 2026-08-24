@@ -285,6 +285,7 @@ export async function runAuditJob(config: Config, args: RunArgs): Promise<any> {
   if (all.length === 0) return { ok: false, error: '没有可审计目标：请提供 targets（url + key）或先保存目标' }
 
   const runId = args.runId ?? makeRunId()
+  const startedAt = Date.now()
   // 给模型数加上限，防止超大值把预算/定时器推到危险范围。
   const rawMax = typeof args.maxModels === 'number' && args.maxModels > 0 ? Math.floor(args.maxModels) : config.maxModels
   const maxModels = Math.min(Math.max(1, rawMax), 100)
@@ -339,6 +340,9 @@ export async function runAuditJob(config: Config, args: RunArgs): Promise<any> {
     outcome = { ...direct, isolation: '同进程（配置 isolate=false）' }
   }
 
+  const durationMs = Date.now() - startedAt
+  const auditedModelNames = [...new Set(outcome.reports.flatMap((r) => r.modelReports.map((m) => m.model)))]
+
   const result: any = {
     ok: true,
     audited: outcome.reports.length,
@@ -347,6 +351,9 @@ export async function runAuditJob(config: Config, args: RunArgs): Promise<any> {
     isolation: outcome.isolation,
     degradedReason: outcome.degradedReason,
     probeCount: outcome.probeCount,
+    callCount: outcome.probeCount,
+    durationMs,
+    auditedModelNames,
     untrustedDataNotice: UNTRUSTED_NOTICE,
     summary: outcome.reports.map((r) => summarize(r)),
     evidenceFile: outcome.evidenceFile,
@@ -410,6 +417,9 @@ export async function runAuditJob(config: Config, args: RunArgs): Promise<any> {
     pluginVersion: PLUGIN_VERSION,
     isolation: outcome.isolation,
     probeCount: outcome.probeCount,
+    durationMs,
+    callCount: outcome.probeCount,
+    auditedModels: auditedModelNames,
     evidenceFile: outcome.evidenceFile,
     evidenceSha256: outcome.evidenceSha256,
     evidenceLines: outcome.evidenceLines,

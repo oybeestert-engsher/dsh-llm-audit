@@ -169,6 +169,9 @@ export interface RunResult {
   isolation?: string
   degradedReason?: string
   probeCount?: number
+  callCount?: number
+  durationMs?: number
+  auditedModelNames?: string[]
   untrustedDataNotice?: string
   summary?: TargetSummary[]
   evidenceFile?: string

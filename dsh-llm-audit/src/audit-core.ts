@@ -2897,12 +2897,28 @@ export interface ReportMeta {
   pluginVersion: string
   isolation: string
   probeCount: number
+  /** 本轮审计总耗时（毫秒）。 */
+  durationMs?: number
+  /** 本轮调用次数（与 probeCount 一致，单独命名更直观）。 */
+  callCount?: number
+  /** 本轮实际审计的模型名列表。 */
+  auditedModels?: string[]
   evidenceFile?: string
   evidenceSha256?: string
   evidenceLines?: number
   degradedReason?: string
   /** 危险 Key 台账文件（本轮有入账时）。 */
   ledgerFile?: string
+}
+
+export function formatDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return '—'
+  if (ms < 1000) return `${Math.round(ms)}ms`
+  const totalSec = Math.round(ms / 1000)
+  if (totalSec < 60) return `${totalSec}s`
+  const m = Math.floor(totalSec / 60)
+  const s = totalSec % 60
+  return s > 0 ? `${m}m ${s}s` : `${m}m`
 }
 
 function mark(v: boolean | undefined, good = '✅', bad = '🚨', none = '—'): string {
@@ -3005,7 +3021,9 @@ export function renderReport(reports: TargetReport[], meta: ReportMeta): string 
 
   L.push('# LLM 端点安全审计报告', '')
   // 结论横幅：第一眼就是结论
-  L.push(`> **整体结论：${overall}** · 最高单模型 ${worst}/100 · 危险模型 **${dangerousTotal}/${totalModels}** · 目标 ${reports.length} 个 / 探测 ${meta.probeCount} 次`, '')
+  const callCount = meta.callCount ?? meta.probeCount
+  const durationText = meta.durationMs !== undefined ? formatDuration(meta.durationMs) : '—'
+  L.push(`> **整体结论：${overall}** · 最高单模型 ${worst}/100 · 危险模型 **${dangerousTotal}/${totalModels}** · 目标 ${reports.length} 个 / 调用 ${callCount} 次 / 用时 ${durationText}`, '')
   if (dangerousTotal > 0) {
     const named = reports.flatMap((r) => r.dangerousModels.map((d) => '`' + safeId(d.model) + '`'))
     L.push(`> 🚨 点名：${named.join('、')}`, '')
@@ -3016,6 +3034,11 @@ export function renderReport(reports: TargetReport[], meta: ReportMeta): string 
   L.push(`| 执行隔离 | ${meta.isolation}${meta.degradedReason !== undefined ? `（降级原因：${meta.degradedReason}）` : ''} |`)
   if (meta.ledgerFile !== undefined) L.push(`| 危险 Key 台账 | \`${meta.ledgerFile}\`（本轮有入账） |`)
   L.push(`| 探测次数 / 覆盖协议 | ${meta.probeCount} / ${[...new Set(reports.map((r) => r.protocol))].map((p) => ({ openai: 'OpenAI 兼容', anthropic: 'Claude', gemini: 'Gemini' } as Record<Protocol, string>)[p]).join('、')} |`)
+  L.push(`| 审计用时 | ${durationText} |`)
+  L.push(`| 调用次数 | ${callCount} |`)
+  if (meta.auditedModels !== undefined && meta.auditedModels.length > 0) {
+    L.push(`| 审计模型 | ${meta.auditedModels.map((m) => '`' + safeId(m) + '`').join('、')} |`)
+  }
   if (meta.evidenceFile !== undefined) {
     L.push(`| 证据文件 | \`${meta.evidenceFile}\`（${meta.evidenceLines ?? 0} 行，SHA-256 \`${meta.evidenceSha256 ?? ''}\`） |`)
   }
