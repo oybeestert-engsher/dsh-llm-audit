@@ -13,7 +13,8 @@
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type JSX, type ReactNode } from 'react'
 import {
-  addTarget, awaitJob, clearTargets, fetchProgress, getAuthToken, listReports, listTargets, probe, readReport, removeTarget, runAudit, setAuthToken,
+  addTarget, awaitJob, clearTargets, discoverModels, fetchProgress, getAuthToken, listReports, listTargets, probe, readReport, removeTarget, runAudit, setAuthToken,
+  type DiscoverResult,
   VENDOR_PRESETS,
   type ModelSummary, type ProgressState, type Protocol, type ReportEntry, type RunResult, type SavedTarget, type TargetSummary,
 } from './service.ts'
@@ -403,6 +404,9 @@ function AuditPanel({ onClose, onCountChange }: { onClose: () => void; onCountCh
   const [protocol, setProtocol] = useState<'' | Protocol>('')
   const [maxModels, setMaxModels] = useState('12')
   const [preset, setPreset] = useState<'full' | 'standard' | 'quick'>('full')
+  /** 模型选择流程：探测结果 + 用户勾选（模型太多时先挑再审）。 */
+  const [pick, setPick] = useState<DiscoverResult | null>(null)
+  const [pickSelected, setPickSelected] = useState<string[]>([])
   const [token, setToken] = useState(getAuthToken())
   const [tokenOpen, setTokenOpen] = useState(false)
   const [busy, setBusy] = useState<null | string>(null)
@@ -509,6 +513,44 @@ function AuditPanel({ onClose, onCountChange }: { onClose: () => void; onCountCh
       const r = await awaitJob(runId)
       setResult(r)
       if (r.ok === false) setError(r.error ?? '探活失败')
+    } catch (e: unknown) { setError(String(e)) } finally { setBusy(null); stopPolling() }
+  }
+
+  /** 获取模型清单（只探测不审计），进入勾选流程。 */
+  const onPickModels = async (): Promise<void> => {
+    if (baseUrl.trim() === '' || apiKey.trim() === '') { setError('选择模型需要在表单里填地址与 Key'); return }
+    setBusy('pick'); setError(null); setPick(null); setPickSelected([]); setResult(null)
+    try {
+      const r = await discoverModels(draft())
+      if (r.ok === false) throw new Error(r.errors?.join('；') ?? '模型清单获取失败')
+      if (r.models.length === 0) throw new Error('端点没有可审计的对话模型' + (r.skipped.length > 0 ? `（${r.skipped.length} 个非对话模型已跳过）` : ''))
+      // 预选：按主力优先排序取「模型上限」个，用户可增删
+      const cap = Number.isFinite(Number(maxModels)) && Number(maxModels) > 0 ? Number(maxModels) : 12
+      setPick(r)
+      setPickSelected(r.models.slice(0, Math.min(cap, r.models.length)))
+    } catch (e: unknown) { setError(String(e)) } finally { setBusy(null) }
+  }
+
+  const togglePick = (m: string): void => {
+    setPickSelected((prev) => (prev.includes(m) ? prev.filter((x) => x !== m) : [...prev, m]))
+  }
+
+  /** 审计用户勾选的模型（useSaved=false，只审表单里这个目标）。 */
+  const onRunPicked = async (): Promise<void> => {
+    if (pick === null || pickSelected.length === 0) { setError('先勾选要审计的模型'); return }
+    setBusy('runpicked'); setError(null); setResult(null); setViewer(null)
+    startPolling()
+    try {
+      const d = draft()
+      const { runId } = await runAudit({
+        targets: [{ name: d.name, baseUrl: d.baseUrl, apiKey: d.apiKey, protocol: d.protocol, models: [...pickSelected] }],
+        useSaved: false,
+        checks: preset,
+      })
+      const r = await awaitJob(runId)
+      setResult(r)
+      if (r.ok === false) setError(r.error ?? '审计失败')
+      await reload()
     } catch (e: unknown) { setError(String(e)) } finally { setBusy(null); stopPolling() }
   }
 
@@ -646,6 +688,43 @@ function AuditPanel({ onClose, onCountChange }: { onClose: () => void; onCountCh
           <button type="button" style={s(btnOutline)} disabled={running} onClick={() => void onAdd()}>添加</button>
         </div>
 
+        {pick !== null ? (
+          <div style={{ border: '1px solid #dfe3ef', borderRadius: 8, padding: '8px 10px', marginTop: 10, background: '#f8f9fd' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 12, fontWeight: 600 }}>
+                选择要审计的模型（已选 {pickSelected.length} / 共 {pick.models.length}）
+              </span>
+              <span style={hintStyle}>
+                {pick.protocol}{pick.clientProfile !== undefined && pick.clientProfile !== 'default' ? ` · ${pick.clientProfile} 指纹` : ''} → {pick.apiRoot}
+              </span>
+            </div>
+            <div style={{ display: 'flex', gap: 6, margin: '6px 0' }}>
+              <button type="button" style={btnTiny} onClick={() => setPickSelected([...pick.models])}>全选</button>
+              <button type="button" style={btnTiny} onClick={() => setPickSelected([])}>全不选</button>
+              <button type="button" style={s(btnPrimary)} disabled={running || pickSelected.length === 0} onClick={() => void onRunPicked()}>
+                审计所选（{pickSelected.length}）
+              </button>
+              {pick.skipped.length > 0 ? (
+                <span style={hintStyle}>另有 {pick.skipped.length} 个非对话模型未列出</span>
+              ) : null}
+            </div>
+            <div style={{ maxHeight: 190, overflowY: 'auto', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px 10px' }}>
+              {pick.models.map((m) => (
+                <label key={m} style={{ ...hintStyle, display: 'flex', alignItems: 'center', gap: 5, cursor: running ? 'not-allowed' : 'pointer', color: '#333340' }}>
+                  <input
+                    type="checkbox"
+                    checked={pickSelected.includes(m)}
+                    onChange={() => togglePick(m)}
+                    disabled={running}
+                    style={{ margin: 0 }}
+                  />
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
         {progress !== null ? <ProgressBar progress={progress} /> : null}
 
         <div ref={resultsRef}>
@@ -718,6 +797,7 @@ function AuditPanel({ onClose, onCountChange }: { onClose: () => void; onCountCh
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12, flex: 'none' }}>
         <button type="button" style={s(btnGhost)} disabled={running} onClick={() => void onClear()}>清空目标</button>
         <button type="button" style={s(btnOutline)} disabled={running} onClick={() => void onProbe()}>快速探活</button>
+        <button type="button" style={s(btnOutline)} disabled={running} onClick={() => void onPickModels()} title="只探测模型清单，勾选后再审计——模型太多时用">选择模型…</button>
         <button type="button" style={s(btnPrimary)} disabled={running} onClick={() => void onRun()}>运行完整审计</button>
       </div>
 

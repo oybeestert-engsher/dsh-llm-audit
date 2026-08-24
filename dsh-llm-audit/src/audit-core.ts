@@ -2688,6 +2688,55 @@ function selectModels(target: AuditTarget, discovered: string[], globalMax?: num
 
 // ──────────────────────── 目标审计（遍历模型）────────────────────────
 
+/** 只探测不审计：拿协议/根与完整模型清单，供 UI 让用户挑选要审的模型。 */
+export async function discoverModels(target: AuditTarget, opts: { timeoutMs: number }): Promise<{
+  ok: boolean
+  protocol: Protocol
+  clientProfile?: ClientProfile
+  apiRoot: string
+  /** 全部对话模型（未套上限，按主力优先排序）。 */
+  models: string[]
+  /** 非对话模型及原因。 */
+  skipped: Array<{ model: string; reason: string }>
+  errors: string[]
+}> {
+  const base = normalizeBase(target.baseUrl)
+  const evidence = new EvidenceLog(undefined, 'discover')
+  const counter: ProbeCounter = { probes: 0 }
+  const keyEcho: KeyEchoLog = { hits: [] }
+  const name = target.name ?? base.replace(/^https?:\/\//, '')
+  const resolved = await resolveEndpoint(target, opts.timeoutMs, evidence, counter, name, keyEcho)
+  await evidence.close()
+  if (!resolved.ok) {
+    return {
+      ok: false,
+      protocol: resolved.protocol,
+      ...(resolved.profile !== 'default' ? { clientProfile: resolved.profile } : {}),
+      apiRoot: resolved.root,
+      models: [],
+      skipped: [],
+      errors: resolved.errors,
+    }
+  }
+  // 与 selectModels 同样的过滤，但不套上限——选择权交给用户
+  const models: string[] = []
+  const skipped: Array<{ model: string; reason: string }> = []
+  for (const id of resolved.modelIds) {
+    if (NON_CHAT_MODEL_RE.test(id)) skipped.push({ model: id, reason: '非对话模型（嵌入/语音/图像等）' })
+    else models.push(id)
+  }
+  models.sort((a, b) => Number(PREFERRED_MODEL_RE.test(b)) - Number(PREFERRED_MODEL_RE.test(a)))
+  return {
+    ok: true,
+    protocol: resolved.protocol,
+    ...(resolved.profile !== 'default' ? { clientProfile: resolved.profile } : {}),
+    apiRoot: resolved.root,
+    models,
+    skipped,
+    errors: [],
+  }
+}
+
 interface TargetPlan {
   target: AuditTarget
   name: string

@@ -21,7 +21,7 @@ import type { Context } from 'cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import z from 'schemastery'
 import {
-  auditRun, buildLedgerEntries, keyFingerprintOf, makeRunId, maskKey, normalizeBase, renderReport, resolveChecks, UNTRUSTED_NOTICE,
+  auditRun, buildLedgerEntries, discoverModels, keyFingerprintOf, makeRunId, maskKey, normalizeBase, renderReport, resolveChecks, UNTRUSTED_NOTICE,
   type AuditRunResult, type AuditTarget, type DangerLedgerRecord, type ProgressUpdate, type ReportMeta, type TargetReport,
 } from './audit-core.js'
 
@@ -930,6 +930,30 @@ export function apply(ctx: Context, config: Config): void {
         }
       },
     }), '@dsh-external/dsh-llm-audit: progress route')
+
+    ctx.effect(() => webServer.register({
+      kind: 'exact',
+      path: ROUTE_PREFIX + '/discover',
+      async handler(req: IncomingMessage, res: ServerResponse) {
+        try {
+          if (req.method !== 'POST') {
+            res.writeHead(405, { allow: 'POST' })
+            return res.end()
+          }
+          if (!guardPanelAccess(req, res, config)) return
+          const body = (await readJson(req)) ?? {}
+          if (!body.baseUrl || !body.apiKey) return sendJson(res, 400, { ok: false, error: '需要 baseUrl 与 apiKey' })
+          // 只探测模型清单，不做任何审计——供 UI 让用户挑选要审的模型
+          const result = await discoverModels(
+            { baseUrl: body.baseUrl, apiKey: body.apiKey, protocol: body.protocol },
+            { timeoutMs: config.timeoutMs },
+          )
+          sendJson(res, 200, clean({ ...result, ok: true }))
+        } catch (e) {
+          sendJson(res, 400, { ok: false, error: errText(e) })
+        }
+      },
+    }), '@dsh-external/dsh-llm-audit: discover route')
 
     ctx.effect(() => webServer.register({
       kind: 'exact',

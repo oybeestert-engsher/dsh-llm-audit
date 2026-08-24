@@ -250,6 +250,25 @@ export function probe(target: TargetDraft): Promise<{ runId: string }> {
   return call('/probe', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(target) })
 }
 
+/** 模型清单探测结果（只探测不审计）。 */
+export interface DiscoverResult {
+  ok: boolean
+  error?: string
+  protocol: Protocol
+  /** 命中的客户端指纹档位（端点做白名单时非 default）。 */
+  clientProfile?: 'default' | 'codex' | 'claude-code'
+  apiRoot: string
+  /** 全部对话模型（未套上限，主力优先排序）——选择权交给用户。 */
+  models: string[]
+  skipped: Array<{ model: string; reason: string }>
+  errors: string[]
+}
+
+/** 只探测模型清单（不审计）：配合「选择模型审计」流程。 */
+export function discoverModels(target: TargetDraft): Promise<DiscoverResult> {
+  return call('/discover', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(target) })
+}
+
 /** 轮询任务直到完成，返回最终结果（失败抛错）。 */
 export async function awaitJob(runId: string, pollMs = 900): Promise<RunResult> {
   for (;;) {
