@@ -39,6 +39,8 @@ export interface TargetDraft {
   baseUrl: string
   apiKey: string
   model?: string
+  /** 指定要审的模型清单（"选择模型"流程勾选后传入；缺省审全部）。 */
+  models?: string[]
   protocol?: Protocol
 }
 
@@ -262,6 +264,8 @@ export interface DiscoverResult {
   models: string[]
   skipped: Array<{ model: string; reason: string }>
   errors: string[]
+  /** UI 内部用：发现时的表单快照（baseUrl+key+protocol），防止改表单后拿旧清单审新端点。 */
+  origin?: string
 }
 
 /** 只探测模型清单（不审计）：配合「选择模型审计」流程。 */

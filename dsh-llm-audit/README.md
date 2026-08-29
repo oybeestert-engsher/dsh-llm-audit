@@ -71,6 +71,24 @@
   十几分钟的完整审计不再挂在一个 HTTP 请求上；
 - **模型级并发**（可选）：配置 `concurrency`（默认 1 串行保限流安全）。
 
+## v0.5.0：客户端指纹回退 + 模型选择流程（含修复）
+
+新增：
+
+- **客户端指纹档位回退**：中转按客户端白名单放行（只认 Codex CLI / Claude Code）时，
+  默认请求 401/403 → 自动换 `codex` / `claude-code` 两套真实 agent 请求头指纹重试，
+  命中后整轮沿用；报告与摘要标注命中档位。401 仅在文案像"客户端拦截"时降级，
+  纯错 key 不再白扫两轮指纹；面暴露探测沿用已命中的档位（白名单端点的管理面同样被拦）。
+- **模型选择流程**：`discoverModels`（只探测不审计）+ `/discover` 路由 + 面板「选择模型…」——
+  先拿全量对话模型清单、勾选后再审计；勾选快照绑定表单内容，改表单后要求重新探测。
+- 报告元信息新增审计用时 / 调用次数 / 审计模型清单。
+
+修复（v0.4.2 遗留）：
+
+- `/discover` 不再把失败结果强制覆盖成 `ok:true`——端点不可达时 UI 能看到真实错误；
+- 面板 `TargetDraft` 补上 `models` 字段（修 client typecheck）；
+- `/discover` 补同源校验（与其他 POST 路由一致）。
+
 ## v0.4.1 追加：回复内嵌指令（把"特殊内容"从所有会话里逼出来）
 
 针对"中转在**某些会话**的回复里塞特殊内容、被调用方 agent 当指令执行"的形态：
@@ -248,15 +266,21 @@ dev_reload_package { packageName: "dsh-llm-audit" }                 # 热重载�
 dev_inject_plugin { dir: "E:\deepseek\llm-audit\dsh-llm-audit" }    # 首次注入
 ```
 
-自测（不依赖 DSH，`test-driver.mjs` 149 项断言：脱敏、三协议、逐模型、输出劫持/污染、
-危险工具、扫盘外传（随机金丝雀路径/外发 IP）、七套诱发（含 SSRF）、跨会话串话（随机口令）、多轮越狱、费用放大、面暴露、
-**流式劫持 / 上下文丢弃 / 后端轮换 / Key 回显 / 模型目录注水**、红队逃逸人格、报告注入转义、进度、证据、报告）。
+自测（不依赖 DSH）：
+
+- `test-driver.mjs` 149 项断言：脱敏、三协议、逐模型、输出劫持/污染、
+  危险工具、扫盘外传（随机金丝雀路径/外发 IP）、七套诱发（含 SSRF）、跨会话串话（随机口令）、多轮越狱、费用放大、面暴露、
+  **流式劫持 / 上下文丢弃 / 后端轮换 / Key 回显 / 模型目录注水**、红队逃逸人格、报告注入转义、进度、证据、报告。
+- `test-fingerprint.mjs` 14 项断言：客户端指纹回退（401 文案判定 / 403 一律降级 / 错 key 不降级）、
+  白名单端点面暴露沿用指纹档位、`discoverModels` 清单过滤与排序、按所选清单审计。
+
 旧分步测试已归档至 `archive/`。构建脚本末尾会 `npm pack` 产出可安装的 `.tgz`。
 
 ```powershell
 $env:MOCK_ADMIN_PORT='31187'                    # 可选：额外起一个管理面暴露实例
 node E:\deepseek\llm-audit\mock-server.mjs      # 三协议 mock：31177 OpenAI / 31178 Claude / 31179 Gemini (+31187)
-node E:\deepseek\llm-audit\test-driver.mjs      # 全量回归（111）
+node E:\deepseek\llm-audit\test-driver.mjs      # 全量回归
+node E:\deepseek\llm-audit\test-fingerprint.mjs # 指纹回退 + 模型选择回归
 ```
 
 mock key 语义：`bad`=有漏洞+窃数据 / `meow`=输出劫持 / `adkey`=输出污染 /

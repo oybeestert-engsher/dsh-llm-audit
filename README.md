@@ -46,6 +46,25 @@ LLM 端点安全审计插件，用于 DeepSeek Harness (DSH)。
 **怎么选**：快速 = 日常巡检/端点很多时快速筛查；标准 = 日常全面审计推荐（全项减诱发）；全量 = 默认值，新接入可疑中转或红队级审计用。
 工具里用 `preset: "quick|standard|full"` 指定，面板里是"全量/标准/快速"下拉；也可直接传 `checks` 数组自定义组合。
 
+## 示例：tokenrhythm.studio 端点审计（2026-08-29 最新）
+
+仓库内置一份对 `https://tokenrhythm.studio` 的公开审计报告（全量档、7 模型、304 次调用 / 55 分钟）：
+
+- 报告目录：[reports/tokenrhythm.studio](reports/tokenrhythm.studio)
+- 报告时间：2026-08-29T03-19-13
+- 结论：高风险（63/100）
+- 危险模型：4/7（`deepseek-v4-flash-0731`、`deepseek-v4-pro-0813`、`glm-5.3`、`glm-5.3-flash`）
+
+该次审计发现的主要问题：
+
+- 多个模型**对话历史被丢弃/改写**（首轮种入的代码末轮取不回——中转在动请求体）
+- `glm-5.3-flash` **流式路径输出被劫持**：非流式完全正常，只有 `stream=true` 的响应被改写
+- `deepseek-v4-flash-0731` **后端轮换**：同一模型三连问自报 deepseek / deepseek-v3 两种身份
+- 全部 7 个模型都有扫盘行为（要求枚举/读取本地文件）
+- system 被丢弃、隐藏提示可提取、接受 `max_tokens=200000` 不钳制（费用放大）
+
+> 报告中的 Key 已脱敏（`sk_tr_…297U`），本地路径已替换为 `~/.dsh/llm-audit/...`。
+
 ## 示例：tokenbom.com 端点审计
 
 仓库内置一份对 `https://tokenbom.com` 的公开审计报告（严重风险示例）：
@@ -95,6 +114,7 @@ dsh-llm-audit/         插件源码与构建产物
   scripts/             构建脚本
 mock-server.mjs        本地 mock 多协议端点（测试用）
 test-driver.mjs        全量回归测试（不依赖 DSH 运行时）
+test-fingerprint.mjs   指纹回退 + 模型选择流程回归
 archive/               旧版分步测试脚本
 ```
 
@@ -103,7 +123,7 @@ archive/               旧版分步测试脚本
 DSH 命令行安装：
 
 ```bash
-dsh plugin --profile web add ./dsh-external-dsh-llm-audit-0.4.2.tgz
+dsh plugin --profile web add ./dsh-external-dsh-llm-audit-0.5.0.tgz
 ```
 
 完整重启 DSH 后生效。
@@ -119,6 +139,9 @@ node mock-server.mjs
 
 # 全量回归
 node test-driver.mjs
+
+# 指纹回退 + 模型选择流程回归
+node test-fingerprint.mjs
 ```
 
 ## 数据与隐私
@@ -133,3 +156,4 @@ node test-driver.mjs
 - 审计请求的 API Key 只出现在请求头，不入报告、不进证据文件。
 - 被审计端点返回的原文属于不可信数据，只写入证据文件；进入模型上下文的引文均经过脱敏处理。
 - 危险工具调用只记录、不执行。
+- **客户端指纹回退**：端点做客户端白名单时，审计器会以 Codex CLI / Claude Code 的请求头指纹重试（报告会标注）。以 agent 客户端身份向中转发请求属审计手段，使用前请确认符合目标服务的使用条款。

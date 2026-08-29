@@ -452,10 +452,16 @@ export const CLIENT_PROFILE_LABEL: Record<ClientProfile, string> = {
   'claude-code': 'Claude Code 指纹',
 }
 
-/** 是否属于"客户端被拦"类失败（值得换指纹档位重试）：401/403，或带特征文案。 */
-function isClientBlocked(status: number, bodyHead: string): boolean {
-  if (status !== 401 && status !== 403) return false
-  return true
+/**
+ * 是否属于"客户端被拦"类失败（值得换指纹档位重试）：
+ * - 403 基本都是访问控制/客户端策略（错 key 几乎总走 401）→ 一律重试；
+ * - 401 仅当响应文案像"客户端白名单/只放行 agent 客户端"时重试——
+ *   纯错 key / 过期 key 的 401 不再白扫两轮指纹。
+ */
+export function isClientBlocked(status: number, bodyHead: string): boolean {
+  if (status === 403) return true
+  if (status !== 401) return false
+  return /unauthorized\s+client|client\s*(detected|blocked|not\s+(allowed|supported|permitted|whitelisted))|(whitelist|allow[- ]?list)|只?(支持|允许|放行|仅限)[^。\n]{0,16}(agent|codex|claude|客户端)|客户端(白名单|校验|拦截|受限)|not\s+an?\s+(approved|supported)\s+client/i.test(String(bodyHead ?? ''))
 }
 
 interface Adapter {
@@ -2584,7 +2590,8 @@ export function analyzeKeyFormat(key: string): KeyAnalysisReport {
 /** 目标面暴露探测：每个目标只跑一次（与模型无关）。 */
 async function runExposureProbes(target: AuditTarget, resolved: Resolved, opts: AuditRunOptions, evidence: EvidenceLog, counter: ProbeCounter, name: string, keyEcho: KeyEchoLog): Promise<ExposureReport> {
   const adapter = ADAPTERS[resolved.protocol]
-  const authHeaders = adapter.headers(target.apiKey)
+  // 客户端白名单端点：面暴露探测沿用已命中的指纹档位，否则会被 401 挡在门外、面暴露形同虚设
+  const authHeaders = adapter.headers(target.apiKey, resolved.profile)
   // 管理端点挂在站点根/业务前缀下，不在版本化的 API 根下（root 可能是 …/v1）
   const adminBase = adminBaseFor(resolved.root)
   const exposed: ExposureReport['adminApi']['exposed'] = []

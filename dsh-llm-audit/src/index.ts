@@ -28,7 +28,7 @@ import {
 export const name = '@dsh-external/dsh-llm-audit'
 export const inject = ['tools']
 
-const PLUGIN_VERSION = '0.4.2'
+const PLUGIN_VERSION = '0.5.0'
 
 export interface Config {
   timeoutMs: number
@@ -941,14 +941,16 @@ export function apply(ctx: Context, config: Config): void {
             return res.end()
           }
           if (!guardPanelAccess(req, res, config)) return
+          if (!isSameOrigin(req)) return sendJson(res, 403, { ok: false, error: '跨站请求被拒绝' })
           const body = (await readJson(req)) ?? {}
           if (!body.baseUrl || !body.apiKey) return sendJson(res, 400, { ok: false, error: '需要 baseUrl 与 apiKey' })
-          // 只探测模型清单，不做任何审计——供 UI 让用户挑选要审的模型
+          // 只探测模型清单，不做任何审计——供 UI 让用户挑选要审的模型。
+          // ok 原样透传：端点不可达/鉴权失败时 UI 必须看到 ok:false，不能被强制成功。
           const result = await discoverModels(
             { baseUrl: body.baseUrl, apiKey: body.apiKey, protocol: body.protocol },
             { timeoutMs: config.timeoutMs },
           )
-          sendJson(res, 200, clean({ ...result, ok: true }))
+          sendJson(res, 200, clean(result))
         } catch (e) {
           sendJson(res, 400, { ok: false, error: errText(e) })
         }

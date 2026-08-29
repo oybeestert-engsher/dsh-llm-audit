@@ -490,6 +490,24 @@ function serve(protocol, port) {
       const path = url.pathname
       const persona = personaOf(req.headers['authorization'] || req.headers['x-api-key'] || req.headers['x-goog-api-key'] || '')
 
+      // ── 客户端白名单门（复刻 agentrouter 类中转）：key 含 agentfw 时，
+      // 只放行 Codex CLI / Claude Code 指纹的请求，其余一律 401 unauthorized client。
+      // 置于一切路由（含管理面）之前——白名单是整站属性，管理面同样被拦。
+      const gateKey = String(req.headers['authorization'] || '').replace(/^Bearer\s+/i, '')
+        || String(req.headers['x-api-key'] || '') || String(req.headers['x-goog-api-key'] || '')
+      if (/agentfw/i.test(gateKey)) {
+        const ua = String(req.headers['user-agent'] || '')
+        const originator = String(req.headers['originator'] || '')
+        const xapp = String(req.headers['x-app'] || '')
+        const isAgentClient = /codex_cli/i.test(ua) || originator === 'codex_cli_rs' || /claude-cli/i.test(ua) || xapp === 'cli'
+        if (!isAgentClient) {
+          return send(res, 401, {
+            error: { message: 'unauthorized client detected, contact support for assistance at https://discord.gg/example' },
+            message: 'UNAUTHENTICATED', success: false, type: 'unauthorized_client_error',
+          })
+        }
+      }
+
       // ── 管理/计费面模拟：只在 MOCK_ADMIN_PORT 指定的实例上暴露（暴露是服务器属性，
       //    与 key 无关——这样"免鉴权可读"才能被无凭据请求如实测出）──
       if ((req.method === 'GET' && path.startsWith('/api/')) || (req.method === 'GET' && path.startsWith('/v1/dashboard/'))) {
@@ -511,21 +529,6 @@ function serve(protocol, port) {
       }
       if (protocol === 'gemini') key = String(req.headers['x-goog-api-key'] || url.searchParams.get('key') || '')
       if (!key) return send(res, 401, { error: { message: `missing credential for ${protocol}` } })
-
-      // ── 客户端白名单门（复刻 agentrouter 类中转）：key 含 agentfw 时，
-      // 只放行 Codex CLI / Claude Code 指纹的请求，其余一律 401 unauthorized client。
-      if (/agentfw/i.test(key)) {
-        const ua = String(req.headers['user-agent'] || '')
-        const originator = String(req.headers['originator'] || '')
-        const xapp = String(req.headers['x-app'] || '')
-        const isAgentClient = /codex_cli/i.test(ua) || originator === 'codex_cli_rs' || /claude-cli/i.test(ua) || xapp === 'cli'
-        if (!isAgentClient) {
-          return send(res, 401, {
-            error: { message: 'unauthorized client detected, contact support for assistance at https://discord.gg/example' },
-            message: 'UNAUTHENTICATED', success: false, type: 'unauthorized_client_error',
-          })
-        }
-      }
 
       // 模型列表
       if (req.method === 'GET' && /\/models$/.test(path)) {

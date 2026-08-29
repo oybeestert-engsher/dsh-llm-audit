@@ -521,12 +521,14 @@ function AuditPanel({ onClose, onCountChange }: { onClose: () => void; onCountCh
     if (baseUrl.trim() === '' || apiKey.trim() === '') { setError('选择模型需要在表单里填地址与 Key'); return }
     setBusy('pick'); setError(null); setPick(null); setPickSelected([]); setResult(null)
     try {
-      const r = await discoverModels(draft())
+      const d = draft()
+      const r = await discoverModels(d)
       if (r.ok === false) throw new Error(r.errors?.join('；') ?? '模型清单获取失败')
       if (r.models.length === 0) throw new Error('端点没有可审计的对话模型' + (r.skipped.length > 0 ? `（${r.skipped.length} 个非对话模型已跳过）` : ''))
       // 预选：按主力优先排序取「模型上限」个，用户可增删
       const cap = Number.isFinite(Number(maxModels)) && Number(maxModels) > 0 ? Number(maxModels) : 12
-      setPick(r)
+      // 记录发现时的表单内容：防止探测 A 后改填 B、拿 A 的模型清单去审 B
+      setPick({ ...r, origin: JSON.stringify([d.baseUrl, d.apiKey, d.protocol]) })
       setPickSelected(r.models.slice(0, Math.min(cap, r.models.length)))
     } catch (e: unknown) { setError(String(e)) } finally { setBusy(null) }
   }
@@ -538,10 +540,14 @@ function AuditPanel({ onClose, onCountChange }: { onClose: () => void; onCountCh
   /** 审计用户勾选的模型（useSaved=false，只审表单里这个目标）。 */
   const onRunPicked = async (): Promise<void> => {
     if (pick === null || pickSelected.length === 0) { setError('先勾选要审计的模型'); return }
+    const d = draft()
+    if (pick.origin !== undefined && pick.origin !== JSON.stringify([d.baseUrl, d.apiKey, d.protocol])) {
+      setError('表单里的地址/Key 已改动，与探测时不一致——请重新点「选择模型…」探测后再审计')
+      return
+    }
     setBusy('runpicked'); setError(null); setResult(null); setViewer(null)
     startPolling()
     try {
-      const d = draft()
       const { runId } = await runAudit({
         targets: [{ name: d.name, baseUrl: d.baseUrl, apiKey: d.apiKey, protocol: d.protocol, models: [...pickSelected] }],
         useSaved: false,
