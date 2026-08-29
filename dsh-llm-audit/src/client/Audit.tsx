@@ -18,7 +18,6 @@ import {
   VENDOR_PRESETS,
   type ModelSummary, type ProgressState, type Protocol, type ReportEntry, type RunResult, type SavedTarget, type TargetSummary,
 } from './service.ts'
-
 /* ── 共享 pill 触发器（DSW token，与自验证/融合触发器同款）── */
 const triggerBase: CSSProperties = {
   display: 'inline-flex', alignItems: 'center', gap: 4, height: 28, maxWidth: 200,
@@ -785,15 +784,9 @@ function AuditPanel({ onClose, onCountChange }: { onClose: () => void; onCountCh
                 ↻ 同步
               </button>
             </div>
-            {reports.slice(0, 5).map((r) => (
-              <div key={r.file} style={rowStyle}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ ...hintStyle, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</div>
-                  <div style={hintStyle}>{new Date(r.mtime).toLocaleString('zh-CN')} · {(r.size / 1024).toFixed(1)} KB</div>
-                </div>
-                <button type="button" style={s(btnTiny)} disabled={running} onClick={() => void onViewReport(r)}>查看</button>
-              </div>
-            ))}
+            <div style={{ maxHeight: 260, overflowY: 'auto', overscrollBehavior: 'contain', paddingRight: 2, marginRight: -2 }}>
+              {reports.map((r) => <ReportRow key={r.file} r={r} onView={() => void onViewReport(r)} disabled={running} />)}
+            </div>
           </>
         ) : null}
 
@@ -808,6 +801,40 @@ function AuditPanel({ onClose, onCountChange }: { onClose: () => void; onCountCh
       </div>
 
       {viewer !== null ? <ReportDrawer title={viewer.title} text={viewer.text} onClose={() => setViewer(null)} /> : null}
+    </div>
+  )
+}
+
+/** 历史报告条目的状态标色：有危险模型=红 / 全部低风险=绿 / 介于其间=黄。 */
+const REPORT_STATUS: Record<string, { color: string; bg: string; label: string }> = {
+  danger: { color: '#a11111', bg: '#fdeaea', label: '🚨 有危险模型' },
+  warn: { color: '#8a5a00', bg: '#fdf3df', label: '⚠️ 有风险项' },
+  clean: { color: '#1a7f37', bg: '#eaf6ee', label: '✅ 全部通过' },
+  unknown: { color: '#55566a', bg: '#eef0f4', label: '报告' },
+}
+
+/** 历史报告条目：状态标色 + 审计网址速览。 */
+function ReportRow({ r, onView, disabled }: { r: ReportEntry; onView: () => void; disabled: boolean }): JSX.Element {
+  const st = REPORT_STATUS[r.status ?? 'unknown'] ?? REPORT_STATUS.unknown
+  const targets = r.targets ?? []
+  const targetsText = targets.length > 0
+    ? targets.map((t) => {
+        const label = t.baseUrl !== '' ? t.baseUrl : t.name
+        const risk = t.level !== '' ? ` · ${t.level}${t.score > 0 ? ` ${t.score}` : ''}` : ''
+        const danger = t.dangerous > 0 ? ` · 危险 ${t.dangerous}/${t.models}` : ''
+        return `${label}${risk}${danger}`
+      }).join('；')
+    : r.name
+  return (
+    <div style={{ ...rowStyle, borderLeft: `3px solid ${st.color}`, alignItems: 'flex-start' }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ flex: 'none', fontSize: 11, fontWeight: 600, padding: '1px 8px', borderRadius: 999, background: st.bg, color: st.color }}>{st.label}</span>
+          <span style={{ ...hintStyle, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{new Date(r.mtime).toLocaleString('zh-CN')} · {(r.size / 1024).toFixed(1)} KB</span>
+        </div>
+        <div style={{ ...hintStyle, marginTop: 2, overflowWrap: 'anywhere' }}>{targetsText}</div>
+      </div>
+      <button type="button" style={{ ...btnTiny, flex: 'none', marginTop: 2 }} disabled={disabled} onClick={onView}>查看</button>
     </div>
   )
 }

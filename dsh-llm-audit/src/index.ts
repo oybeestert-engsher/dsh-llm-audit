@@ -28,7 +28,7 @@ import {
 export const name = '@dsh-external/dsh-llm-audit'
 export const inject = ['tools']
 
-const PLUGIN_VERSION = '0.5.0'
+const PLUGIN_VERSION = '0.5.1'
 
 export interface Config {
   timeoutMs: number
@@ -606,15 +606,67 @@ export function targetsCommand(action: string, payload: { target?: any; name?: s
   })
 }
 
-/** 列出历史报告（面板"查看报告"用）。 */
-function listReports(limit = 20): Array<{ file: string; name: string; size: number; mtime: string }> {
+/** 报告条目速览里的单目标摘要（面板列表显示网址与红/绿状态用）。 */
+export interface ReportTargetBrief {
+  name: string
+  baseUrl: string
+  level: string
+  score: number
+  dangerous: number
+  models: number
+}
+
+/** 报告整体状态：有危险模型=红 / 全部低风险=绿 / 介于其间=黄 / 解析不出=unknown。 */
+export interface ReportBrief {
+  status: 'danger' | 'clean' | 'warn' | 'unknown'
+  targets: ReportTargetBrief[]
+}
+
+/** 从报告同级 JSON 提取目标清单与危险状态；JSON 缺失时退回 md 横幅/章节头解析。 */
+function reportBrief(mdPath: string): ReportBrief {
+  const jsonPath = mdPath.replace(/\.md$/, '.json')
+  try {
+    const parsed = JSON.parse(fs.readFileSync(jsonPath, 'utf8'))
+    const reports: any[] = Array.isArray(parsed?.reports) ? parsed.reports : []
+    const targets: ReportTargetBrief[] = reports.map((r) => ({
+      name: String(r?.name ?? '?'),
+      baseUrl: String(r?.baseUrl ?? ''),
+      level: String(r?.risk?.level ?? ''),
+      score: Number(r?.risk?.score ?? 0) || 0,
+      dangerous: Array.isArray(r?.dangerousModels) ? r.dangerousModels.length : 0,
+      models: Array.isArray(r?.auditedModels) ? r.auditedModels.length : 0,
+    }))
+    if (targets.length === 0) return { status: 'unknown', targets: [] }
+    const anyDanger = targets.some((t) => t.dangerous > 0 || t.score >= 45)
+    const allClean = targets.every((t) => t.level === '低风险')
+    return { status: anyDanger ? 'danger' : allClean ? 'clean' : 'warn', targets }
+  } catch {
+    try {
+      const text = fs.readFileSync(mdPath, 'utf8')
+      const banner = /危险模型\s*\*\*(\d+)\/(\d+)\*\*/.exec(text)
+      const targets: ReportTargetBrief[] = [...text.matchAll(/^## \d+\. (.+?) — (低风险|中风险|高风险|严重|未评估|不可达)（(\d+)\/100）$/gm)].map((mm) => ({
+        name: mm[1].trim(), baseUrl: '', level: mm[2], score: Number(mm[3]), dangerous: 0, models: 0,
+      }))
+      if (targets.length === 0) return { status: 'unknown', targets: [] }
+      const anyDanger = (banner !== null && Number(banner[1]) > 0) || targets.some((t) => t.score >= 45)
+      const allClean = targets.every((t) => t.level === '低风险')
+      return { status: anyDanger ? 'danger' : allClean ? 'clean' : 'warn', targets }
+    } catch {
+      return { status: 'unknown', targets: [] }
+    }
+  }
+}
+
+/** 列出历史报告（面板"查看报告"用）：带目标网址速览与红/黄/绿状态。 */
+function listReports(limit = 20): Array<{ file: string; name: string; size: number; mtime: string; status: ReportBrief['status']; targets: ReportTargetBrief[] }> {
   try {
     return fs.readdirSync(reportsDir())
       .filter((f) => f.endsWith('.md'))
       .map((f) => {
         const full = join(reportsDir(), f)
         const st = fs.statSync(full)
-        return { file: full, name: f, size: st.size, mtime: st.mtime.toISOString() }
+        const brief = reportBrief(full)
+        return { file: full, name: f, size: st.size, mtime: st.mtime.toISOString(), status: brief.status, targets: brief.targets }
       })
       .sort((a, b) => b.mtime.localeCompare(a.mtime))
       .slice(0, limit)

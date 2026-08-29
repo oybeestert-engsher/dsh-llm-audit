@@ -204,11 +204,25 @@ export interface ProgressState {
   error?: string
 }
 
+/** 报告速览里的单目标摘要（网址 + 风险 + 危险模型数）。 */
+export interface ReportTargetBrief {
+  name: string
+  baseUrl: string
+  level: string
+  score: number
+  dangerous: number
+  models: number
+}
+
 export interface ReportEntry {
   file: string
   name: string
   size: number
   mtime: string
+  /** 整份报告状态：有危险模型=danger（红）/ 全部低风险=clean（绿）/ 介于其间=warn（黄）。 */
+  status?: 'danger' | 'clean' | 'warn' | 'unknown'
+  /** 审计过的目标清单（网址速览）。 */
+  targets?: ReportTargetBrief[]
 }
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
