@@ -415,6 +415,7 @@ function AuditPanel({ onClose, onCountChange }: { onClose: () => void; onCountCh
   const [progress, setProgress] = useState<ProgressState | null>(null)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [descOpen, setDescOpen] = useState(false)
+  const [synced, setSynced] = useState(false)
   const resultsRef = useRef<HTMLDivElement | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -429,6 +430,8 @@ function AuditPanel({ onClose, onCountChange }: { onClose: () => void; onCountCh
       const rep = await listReports()
       setReports(rep.reports ?? [])
     } catch { /* 报告目录还不存在时忽略 */ }
+    setSynced(true)
+    setTimeout(() => setSynced(false), 1500)
   }, [onCountChange])
 
   useEffect(() => { void reload() }, [reload])
@@ -781,7 +784,7 @@ function AuditPanel({ onClose, onCountChange }: { onClose: () => void; onCountCh
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, marginBottom: 6 }}>
               <p style={{ ...sectionLabel, margin: 0 }}>历史报告（{reports.length}）</p>
               <button type="button" style={btnTiny} disabled={running} onClick={() => void reload()} title="重新扫描报告目录——会话内跑的审计也会落在这里，点一下即可同步">
-                ↻ 同步
+                {synced ? '✓ 已同步' : '↻ 同步'}
               </button>
             </div>
             <div style={{ maxHeight: 260, overflowY: 'auto', overscrollBehavior: 'contain', paddingRight: 2, marginRight: -2 }}>
