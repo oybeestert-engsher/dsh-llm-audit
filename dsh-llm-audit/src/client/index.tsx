@@ -10,6 +10,7 @@
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 // 模块加载导入：合并本插件读取的 composer SlotMap 键。
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+import { createElement } from 'react'
 import { AuditTrigger } from './Audit.tsx'
 
 /** 必需服务：slots。 */
@@ -39,10 +40,26 @@ export function apply(ctx: ClientContext): void {
   }, 'dsh-llm-audit: composer pill token compatibility')
 
   ctx.inject(['slots'], (scope) => {
-    scope.slots.inject('conversation.input.left', () => scope.slots.register({
-      name: 'conversation.input.left',
+    // 双版本适配：dsh >=0.1.2-alpha 用 dock 层（fit-content 包装，避免被列布局
+    // 拉伸成整行）；dsh <=0.1.1-rc 仍用 composer 工具行。判据：启动图里是否有
+    // 0.1.2 独有包 @deepseek-ai/dsh-client-ui-session。异常时退回旧版行为。
+    let slotName = 'conversation.input.left'
+    let order = 33
+    let Wrapped: typeof AuditTrigger = AuditTrigger
+    try {
+      const entries: Array<{ id?: string }> =
+        (window as unknown as { __DSH_BOOT__?: { entries?: Array<{ id?: string }> } }).__DSH_BOOT__?.entries ?? []
+      if (entries.map((e) => e.id ?? '').includes('@deepseek-ai/dsh-client-ui-session')) {
+        slotName = 'conversation.input.dock'
+        order = 44
+        Wrapped = ((props: Record<string, unknown>) =>
+          createElement('div', { style: { width: 'fit-content' } }, createElement(AuditTrigger, props))) as typeof AuditTrigger
+      }
+    } catch { /* keep legacy defaults */ }
+    scope.slots.inject(slotName, () => scope.slots.register({
+      name: slotName,
       id: 'dsh-llm-audit',
-      order: 33,
-    }, AuditTrigger))
+      order,
+    }, Wrapped))
   })
 }
