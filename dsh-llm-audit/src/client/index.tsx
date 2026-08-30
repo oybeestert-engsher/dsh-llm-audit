@@ -42,24 +42,28 @@ export function apply(ctx: ClientContext): void {
   ctx.inject(['slots'], (scope) => {
     // 双版本适配：dsh >=0.1.2-alpha 用 dock 层（fit-content 包装，避免被列布局
     // 拉伸成整行）；dsh <=0.1.1-rc 仍用 composer 工具行。判据：启动图里是否有
-    // 0.1.2 独有包 @deepseek-ai/dsh-client-ui-session。异常时退回旧版行为。
-    let slotName = 'conversation.input.left'
-    let order = 33
-    let Wrapped: typeof AuditTrigger = AuditTrigger
+    // 0.1.2 独有包 @deepseek-ai/dsh-client-ui-session；异常时退回旧版行为。
+    // 注意：两个分支的 register name 必须保持字符串字面量——super-injector 的
+    // 自愈校验器会静态扫描 lib/client.js，变量名会被判非法并跳过注入。
     try {
       const entries: Array<{ id?: string }> =
         (window as unknown as { __DSH_BOOT__?: { entries?: Array<{ id?: string }> } }).__DSH_BOOT__?.entries ?? []
-      if (entries.map((e) => e.id ?? '').includes('@deepseek-ai/dsh-client-ui-session')) {
-        slotName = 'conversation.input.dock'
-        order = 44
-        Wrapped = ((props: Record<string, unknown>) =>
+      const isNewDsh = entries.map((e) => e.id ?? '').includes('@deepseek-ai/dsh-client-ui-session')
+      if (isNewDsh) {
+        const DockWrapped = ((props: Record<string, unknown>) =>
           createElement('div', { style: { width: 'fit-content' } }, createElement(AuditTrigger, props))) as typeof AuditTrigger
+        scope.slots.inject('conversation.input.dock', () => scope.slots.register({
+          name: 'conversation.input.dock',
+          id: 'dsh-llm-audit',
+          order: 44,
+        }, DockWrapped))
+        return
       }
-    } catch { /* keep legacy defaults */ }
-    scope.slots.inject(slotName, () => scope.slots.register({
-      name: slotName,
+    } catch { /* keep legacy registration */ }
+    scope.slots.inject('conversation.input.left', () => scope.slots.register({
+      name: 'conversation.input.left',
       id: 'dsh-llm-audit',
-      order,
-    }, Wrapped))
+      order: 33,
+    }, AuditTrigger))
   })
 }
